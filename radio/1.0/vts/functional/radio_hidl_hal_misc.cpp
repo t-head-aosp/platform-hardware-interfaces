@@ -248,7 +248,8 @@ TEST_F(RadioHidlTest, getNeighboringCids) {
     EXPECT_EQ(serial, radioRsp->rspInfo.serial);
 
     if (cardStatus.cardState == CardState::ABSENT) {
-        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE);
+        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE ||
+                    radioRsp->rspInfo.error == RadioError::SIM_ABSENT);
     }
 }
 
@@ -280,7 +281,8 @@ TEST_F(RadioHidlTest, setCdmaRoamingPreference) {
     EXPECT_EQ(serial, radioRsp->rspInfo.serial);
 
     if (cardStatus.cardState == CardState::ABSENT) {
-        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE);
+        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE ||
+                    radioRsp->rspInfo.error == RadioError::REQUEST_NOT_SUPPORTED);
     }
 }
 
@@ -345,7 +347,8 @@ TEST_F(RadioHidlTest, setPreferredVoicePrivacy) {
     EXPECT_EQ(serial, radioRsp->rspInfo.serial);
 
     if (cardStatus.cardState == CardState::ABSENT) {
-        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE);
+        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE ||
+                    radioRsp->rspInfo.error == RadioError::REQUEST_NOT_SUPPORTED);
     }
 }
 
@@ -361,7 +364,8 @@ TEST_F(RadioHidlTest, getPreferredVoicePrivacy) {
     EXPECT_EQ(serial, radioRsp->rspInfo.serial);
 
     if (cardStatus.cardState == CardState::ABSENT) {
-        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE);
+        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE ||
+                    radioRsp->rspInfo.error == RadioError::REQUEST_NOT_SUPPORTED);
     }
 }
 
@@ -494,7 +498,8 @@ TEST_F(RadioHidlTest, setCellInfoListRate) {
     EXPECT_EQ(serial, radioRsp->rspInfo.serial);
 
     if (cardStatus.cardState == CardState::ABSENT) {
-        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE);
+        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE ||
+                    radioRsp->rspInfo.error == RadioError::REQUEST_NOT_SUPPORTED);
     }
 }
 
@@ -562,7 +567,8 @@ TEST_F(RadioHidlTest, nvResetConfig) {
     EXPECT_EQ(serial, radioRsp->rspInfo.serial);
 
     if (cardStatus.cardState == CardState::ABSENT) {
-        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE);
+        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE ||
+                    radioRsp->rspInfo.error == RadioError::REQUEST_NOT_SUPPORTED);
     }
 }
 
@@ -671,9 +677,11 @@ TEST_F(RadioHidlTest, startLceService) {
 
     if (cardStatus.cardState == CardState::ABSENT) {
         std::cout << static_cast<int>(radioRsp->rspInfo.error) << std::endl;
-        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::RADIO_NOT_AVAILABLE ||
+        ASSERT_TRUE(radioRsp->rspInfo.error ==
+                        RadioError::RADIO_NOT_AVAILABLE ||
                     radioRsp->rspInfo.error == RadioError::LCE_NOT_SUPPORTED ||
-                    radioRsp->rspInfo.error == RadioError::INTERNAL_ERR);
+                    radioRsp->rspInfo.error == RadioError::INTERNAL_ERR ||
+                    radioRsp->rspInfo.error == RadioError::SIM_ABSENT);
     }
 }
 
@@ -690,7 +698,10 @@ TEST_F(RadioHidlTest, stopLceService) {
 
     if (cardStatus.cardState == CardState::ABSENT) {
         ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE ||
-                    radioRsp->rspInfo.error == RadioError::LCE_NOT_SUPPORTED);
+                    radioRsp->rspInfo.error == RadioError::LCE_NOT_SUPPORTED ||
+                    radioRsp->rspInfo.error ==
+                        RadioError::REQUEST_NOT_SUPPORTED ||
+                    radioRsp->rspInfo.error == RadioError::SIM_ABSENT);
     }
 }
 
@@ -706,8 +717,11 @@ TEST_F(RadioHidlTest, pullLceData) {
     EXPECT_EQ(serial, radioRsp->rspInfo.serial);
 
     if (cardStatus.cardState == CardState::ABSENT) {
-        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::RADIO_NOT_AVAILABLE || CheckOEMError() ||
-                    radioRsp->rspInfo.error == RadioError::INTERNAL_ERR);
+        ASSERT_TRUE(radioRsp->rspInfo.error ==
+                        RadioError::RADIO_NOT_AVAILABLE ||
+                    CheckOEMError() ||
+                    radioRsp->rspInfo.error == RadioError::INTERNAL_ERR ||
+                    radioRsp->rspInfo.error == RadioError::SIM_ABSENT);
     }
 }
 
@@ -723,7 +737,8 @@ TEST_F(RadioHidlTest, getModemActivityInfo) {
     EXPECT_EQ(serial, radioRsp->rspInfo.serial);
 
     if (cardStatus.cardState == CardState::ABSENT) {
-        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE);
+        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE ||
+                    radioRsp->rspInfo.error == RadioError::REQUEST_NOT_SUPPORTED);
     }
 }
 
@@ -747,7 +762,9 @@ TEST_F(RadioHidlTest, setAllowedCarriers) {
     EXPECT_EQ(serial, radioRsp->rspInfo.serial);
 
     if (cardStatus.cardState == CardState::ABSENT) {
-        EXPECT_EQ(radioRsp->rspInfo.error, RadioError::NONE);
+        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE ||
+                    radioRsp->rspInfo.error ==
+                        RadioError::REQUEST_NOT_SUPPORTED);
     }
 
     /* Reset back to no carrier restriction */
@@ -761,7 +778,9 @@ TEST_F(RadioHidlTest, setAllowedCarriers) {
     EXPECT_EQ(serial, radioRsp->rspInfo.serial);
 
     if (cardStatus.cardState == CardState::ABSENT) {
-        EXPECT_EQ(radioRsp->rspInfo.error, RadioError::NONE);
+        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE ||
+                    radioRsp->rspInfo.error ==
+                        RadioError::REQUEST_NOT_SUPPORTED);
     }
 }
 
@@ -777,7 +796,8 @@ TEST_F(RadioHidlTest, getAllowedCarriers) {
     EXPECT_EQ(serial, radioRsp->rspInfo.serial);
 
     if (cardStatus.cardState == CardState::ABSENT) {
-        EXPECT_EQ(radioRsp->rspInfo.error, RadioError::NONE);
+        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE ||
+                    radioRsp->rspInfo.error == RadioError::REQUEST_NOT_SUPPORTED);
     }
 }
 
@@ -792,9 +812,11 @@ TEST_F(RadioHidlTest, sendDeviceState) {
     EXPECT_EQ(RadioResponseType::SOLICITED, radioRsp->rspInfo.type);
     EXPECT_EQ(serial, radioRsp->rspInfo.serial);
 
+    std::cout << static_cast<int>(radioRsp->rspInfo.error) << std::endl;
+
     if (cardStatus.cardState == CardState::ABSENT) {
-        ASSERT_TRUE(CheckGeneralError() ||
-                    radioRsp->rspInfo.error == RadioError::INVALID_ARGUMENTS);
+        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE ||
+                    radioRsp->rspInfo.error == RadioError::REQUEST_NOT_SUPPORTED);
     }
 }
 
@@ -809,9 +831,11 @@ TEST_F(RadioHidlTest, setIndicationFilter) {
     EXPECT_EQ(RadioResponseType::SOLICITED, radioRsp->rspInfo.type);
     EXPECT_EQ(serial, radioRsp->rspInfo.serial);
 
+    std::cout << static_cast<int>(radioRsp->rspInfo.error) << std::endl;
+
     if (cardStatus.cardState == CardState::ABSENT) {
-        ASSERT_TRUE(CheckGeneralError() ||
-                    radioRsp->rspInfo.error == RadioError::INVALID_ARGUMENTS);
+        ASSERT_TRUE(radioRsp->rspInfo.error == RadioError::NONE ||
+                    radioRsp->rspInfo.error == RadioError::REQUEST_NOT_SUPPORTED);
     }
 }
 
