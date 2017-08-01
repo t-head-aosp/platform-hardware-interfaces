@@ -131,22 +131,34 @@ namespace {
     const char *kHAL1_0 = "1.0";
 
     bool matchDeviceName(const hidl_string& deviceName,
-            const hidl_string &providerType, std::smatch& sm) {
+            const hidl_string &providerType,
+            std::string* deviceVersion,
+            std::string* cameraId) {
         ::android::String8 pattern;
         pattern.appendFormat(kDeviceNameRE, providerType.c_str());
         std::regex e(pattern.string());
         std::string deviceNameStd(deviceName.c_str());
-        return std::regex_match(deviceNameStd, sm, e);
+        std::smatch sm;
+        if (std::regex_match(deviceNameStd, sm, e)) {
+            if (deviceVersion != nullptr) {
+                *deviceVersion = sm[1];
+            }
+            if (cameraId != nullptr) {
+                *cameraId = sm[2];
+            }
+            return true;
+        }
+        return false;
     }
 
     int getCameraDeviceVersion(const hidl_string& deviceName,
             const hidl_string &providerType) {
-        std::smatch sm;
-        bool match = matchDeviceName(deviceName, providerType, sm);
+        std::string version;
+        bool match = matchDeviceName(deviceName, providerType, &version, nullptr);
         if (!match) {
             return -1;
         }
-        std::string version = sm[1].str();
+
         if (version.compare(kHAL3_2) == 0) {
             // maybe switched to 3.4 or define the hidl version enumlater
             return CAMERA_DEVICE_API_VERSION_3_2;
@@ -2441,7 +2453,8 @@ TEST_F(CameraHidlTest, configureStreamsAvailableOutputs) {
                     Stream stream = {streamId, StreamType::OUTPUT,
                             static_cast<uint32_t> (it.width),
                             static_cast<uint32_t> (it.height),
-                            static_cast<PixelFormat> (it.format), 0, 0,
+                            static_cast<PixelFormat> (it.format),
+                            GRALLOC1_CONSUMER_USAGE_HWCOMPOSER, 0,
                             StreamRotation::ROTATION_0};
                     ::android::hardware::hidl_vec<Stream> streams = {stream};
                     StreamConfiguration config = {streams,
@@ -2490,7 +2503,8 @@ TEST_F(CameraHidlTest, configureStreamsInvalidOutputs) {
                         static_cast<uint32_t> (0),
                         static_cast<uint32_t> (0),
                         static_cast<PixelFormat> (outputStreams[0].format),
-                        0, 0, StreamRotation::ROTATION_0};
+                        GRALLOC1_CONSUMER_USAGE_HWCOMPOSER, 0,
+                        StreamRotation::ROTATION_0};
                 ::android::hardware::hidl_vec<Stream> streams = {stream};
                 StreamConfiguration config = {streams,
                         StreamConfigurationMode::NORMAL_MODE};
@@ -2505,7 +2519,8 @@ TEST_F(CameraHidlTest, configureStreamsInvalidOutputs) {
                         static_cast<uint32_t> (UINT32_MAX),
                         static_cast<uint32_t> (UINT32_MAX),
                         static_cast<PixelFormat> (outputStreams[0].format),
-                        0, 0, StreamRotation::ROTATION_0};
+                        GRALLOC1_CONSUMER_USAGE_HWCOMPOSER, 0,
+                        StreamRotation::ROTATION_0};
                 streams[0] = stream;
                 config = {streams,
                         StreamConfigurationMode::NORMAL_MODE};
@@ -2520,7 +2535,8 @@ TEST_F(CameraHidlTest, configureStreamsInvalidOutputs) {
                             static_cast<uint32_t> (it.width),
                             static_cast<uint32_t> (it.height),
                             static_cast<PixelFormat> (UINT32_MAX),
-                            0, 0, StreamRotation::ROTATION_0};
+                            GRALLOC1_CONSUMER_USAGE_HWCOMPOSER, 0,
+                            StreamRotation::ROTATION_0};
                     streams[0] = stream;
                     config = {streams,
                             StreamConfigurationMode::NORMAL_MODE};
@@ -2534,7 +2550,8 @@ TEST_F(CameraHidlTest, configureStreamsInvalidOutputs) {
                             static_cast<uint32_t> (it.width),
                             static_cast<uint32_t> (it.height),
                             static_cast<PixelFormat> (it.format),
-                            0, 0, static_cast<StreamRotation> (UINT32_MAX)};
+                            GRALLOC1_CONSUMER_USAGE_HWCOMPOSER, 0,
+                            static_cast<StreamRotation> (UINT32_MAX)};
                     streams[0] = stream;
                     config = {streams,
                             StreamConfigurationMode::NORMAL_MODE};
@@ -2611,12 +2628,14 @@ TEST_F(CameraHidlTest, configureStreamsZSLInputOutputs) {
                         Stream inputStream = {streamId++, StreamType::INPUT,
                                 static_cast<uint32_t> (input.width),
                                 static_cast<uint32_t> (input.height),
-                                static_cast<PixelFormat> (input.format), 0, 0,
+                                static_cast<PixelFormat> (input.format),
+                                0, 0,
                                 StreamRotation::ROTATION_0};
                         Stream outputStream = {streamId++, StreamType::OUTPUT,
                                 static_cast<uint32_t> (outputIter.width),
                                 static_cast<uint32_t> (outputIter.height),
-                                static_cast<PixelFormat> (outputIter.format), 0, 0,
+                                static_cast<PixelFormat> (outputIter.format),
+                                GRALLOC1_CONSUMER_USAGE_HWCOMPOSER, 0,
                                 StreamRotation::ROTATION_0};
 
                         ::android::hardware::hidl_vec<Stream> streams = {
@@ -2678,12 +2697,14 @@ TEST_F(CameraHidlTest, configureStreamsPreviewStillOutputs) {
                         Stream previewStream = {streamId++, StreamType::OUTPUT,
                                 static_cast<uint32_t> (previewIter.width),
                                 static_cast<uint32_t> (previewIter.height),
-                                static_cast<PixelFormat> (previewIter.format), 0, 0,
+                                static_cast<PixelFormat> (previewIter.format),
+                                GRALLOC1_CONSUMER_USAGE_HWCOMPOSER, 0,
                                 StreamRotation::ROTATION_0};
                         Stream blobStream = {streamId++, StreamType::OUTPUT,
                                 static_cast<uint32_t> (blobIter.width),
                                 static_cast<uint32_t> (blobIter.height),
-                                static_cast<PixelFormat> (blobIter.format), 0, 0,
+                                static_cast<PixelFormat> (blobIter.format),
+                                GRALLOC1_CONSUMER_USAGE_CPU_READ, 0,
                                 StreamRotation::ROTATION_0};
                         ::android::hardware::hidl_vec<Stream> streams = {
                                 previewStream, blobStream};
@@ -2739,7 +2760,8 @@ TEST_F(CameraHidlTest, configureStreamsConstrainedOutputs) {
                 Stream stream = {streamId, StreamType::OUTPUT,
                         static_cast<uint32_t> (hfrStream.width),
                         static_cast<uint32_t> (hfrStream.height),
-                        static_cast<PixelFormat> (hfrStream.format), 0, 0,
+                        static_cast<PixelFormat> (hfrStream.format),
+                        GRALLOC1_CONSUMER_USAGE_VIDEO_ENCODER, 0,
                         StreamRotation::ROTATION_0};
                 ::android::hardware::hidl_vec<Stream> streams = {stream};
                 StreamConfiguration config = {streams,
@@ -2755,7 +2777,8 @@ TEST_F(CameraHidlTest, configureStreamsConstrainedOutputs) {
                 stream = {streamId++, StreamType::OUTPUT,
                         static_cast<uint32_t> (0),
                         static_cast<uint32_t> (0),
-                        static_cast<PixelFormat> (hfrStream.format), 0, 0,
+                        static_cast<PixelFormat> (hfrStream.format),
+                        GRALLOC1_CONSUMER_USAGE_VIDEO_ENCODER, 0,
                         StreamRotation::ROTATION_0};
                 streams[0] = stream;
                 config = {streams,
@@ -2770,7 +2793,8 @@ TEST_F(CameraHidlTest, configureStreamsConstrainedOutputs) {
                 stream = {streamId++, StreamType::OUTPUT,
                         static_cast<uint32_t> (UINT32_MAX),
                         static_cast<uint32_t> (UINT32_MAX),
-                        static_cast<PixelFormat> (hfrStream.format), 0, 0,
+                        static_cast<PixelFormat> (hfrStream.format),
+                        GRALLOC1_CONSUMER_USAGE_VIDEO_ENCODER, 0,
                         StreamRotation::ROTATION_0};
                 streams[0] = stream;
                 config = {streams,
@@ -2784,7 +2808,8 @@ TEST_F(CameraHidlTest, configureStreamsConstrainedOutputs) {
                 stream = {streamId++, StreamType::OUTPUT,
                         static_cast<uint32_t> (hfrStream.width),
                         static_cast<uint32_t> (hfrStream.height),
-                        static_cast<PixelFormat> (UINT32_MAX), 0, 0,
+                        static_cast<PixelFormat> (UINT32_MAX),
+                        GRALLOC1_CONSUMER_USAGE_VIDEO_ENCODER, 0,
                         StreamRotation::ROTATION_0};
                 streams[0] = stream;
                 config = {streams,
@@ -2842,12 +2867,13 @@ TEST_F(CameraHidlTest, configureStreamsVideoStillOutputs) {
                                 static_cast<uint32_t> (videoIter.width),
                                 static_cast<uint32_t> (videoIter.height),
                                 static_cast<PixelFormat> (videoIter.format),
-                                0, 0, StreamRotation::ROTATION_0};
+                                GRALLOC1_CONSUMER_USAGE_VIDEO_ENCODER, 0,
+                                StreamRotation::ROTATION_0};
                         Stream blobStream = {streamId++, StreamType::OUTPUT,
                                 static_cast<uint32_t> (blobIter.width),
                                 static_cast<uint32_t> (blobIter.height),
                                 static_cast<PixelFormat> (blobIter.format),
-                                GRALLOC_USAGE_HW_VIDEO_ENCODER, 0,
+                                GRALLOC1_CONSUMER_USAGE_CPU_READ, 0,
                                 StreamRotation::ROTATION_0};
                         ::android::hardware::hidl_vec<Stream> streams = {
                                 videoStream, blobStream};
@@ -2977,6 +3003,9 @@ TEST_F(CameraHidlTest, processCaptureRequestPreview) {
                     //Empty settings should be supported after the first call
                     //for repeating requests.
                     request.settings.setToExternal(nullptr, 0, true);
+                    // The buffer has been registered to HAL by bufferId, so per
+                    // API contract we should send a null handle for this buffer
+                    request.outputBuffers[0].buffer = nullptr;
                     mInflightMap.clear();
                     inflightReq = {1, false, supportsPartialResults,
                                         partialResultCount, resultQueue};
@@ -3073,7 +3102,10 @@ TEST_F(CameraHidlTest, processCaptureRequestInvalidSinglePreview) {
                             numRequestProcessed = n;
                         });
                 ASSERT_TRUE(ret.isOk());
-                ASSERT_EQ(Status::INTERNAL_ERROR, status);
+                // b/64041692: Temporariy accept ILLEGAL_ARGUMENT or INTERNAL_ERROR
+                // It will be changed to only accept ILLEGAL_ARGUMENT in next release
+                ASSERT_TRUE(status == Status::ILLEGAL_ARGUMENT ||
+                        status == Status::INTERNAL_ERROR);
                 ASSERT_EQ(numRequestProcessed, 0u);
 
                 ret = session->close();
@@ -3134,7 +3166,10 @@ TEST_F(CameraHidlTest, processCaptureRequestInvalidBuffer) {
                             numRequestProcessed = n;
                         });
                 ASSERT_TRUE(ret.isOk());
-                ASSERT_EQ(Status::INTERNAL_ERROR, status);
+                // b/64041692: Temporariy accept ILLEGAL_ARGUMENT or INTERNAL_ERROR
+                // It will be changed to only accept ILLEGAL_ARGUMENT in next release
+                ASSERT_TRUE(status == Status::ILLEGAL_ARGUMENT ||
+                        status == Status::INTERNAL_ERROR);
                 ASSERT_EQ(numRequestProcessed, 0u);
 
                 ret = session->close();
@@ -3567,7 +3602,7 @@ void CameraHidlTest::configurePreviewStream(const std::string &name,
             static_cast<uint32_t> (outputPreviewStreams[0].width),
             static_cast<uint32_t> (outputPreviewStreams[0].height),
             static_cast<PixelFormat> (outputPreviewStreams[0].format),
-            0, 0, StreamRotation::ROTATION_0};
+            GRALLOC1_CONSUMER_USAGE_HWCOMPOSER, 0, StreamRotation::ROTATION_0};
     ::android::hardware::hidl_vec<Stream> streams = {*previewStream};
     StreamConfiguration config = {streams,
             StreamConfigurationMode::NORMAL_MODE};
