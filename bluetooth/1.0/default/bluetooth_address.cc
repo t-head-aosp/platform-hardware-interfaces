@@ -16,8 +16,8 @@
 
 #include "bluetooth_address.h"
 
-#include <android-base/logging.h>
 #include <cutils/properties.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <utils/Log.h>
 
@@ -44,46 +44,49 @@ bool BluetoothAddress::string_to_bytes(const char* addr_str, uint8_t* addr) {
 
 bool BluetoothAddress::get_local_address(uint8_t* local_addr) {
   char property[PROPERTY_VALUE_MAX] = {0};
-  bool valid_bda = false;
 
   // Get local bdaddr storage path from a system property.
   if (property_get(PROPERTY_BT_BDADDR_PATH, property, NULL)) {
-    int addr_fd;
-
     ALOGD("%s: Trying %s", __func__, property);
 
-    addr_fd = open(property, O_RDONLY);
+    int addr_fd = open(property, O_RDONLY);
     if (addr_fd != -1) {
-      int bytes_read = read(addr_fd, property, kStringLength);
-      CHECK(bytes_read == kStringLength);
+      char address[kStringLength + 1] = {0};
+      int bytes_read = read(addr_fd, address, kStringLength);
+      if (bytes_read == -1) {
+        ALOGE("%s: Error reading address from %s: %s", __func__, property,
+              strerror(errno));
+      }
       close(addr_fd);
 
       // Null terminate the string.
-      property[kStringLength] = '\0';
+      address[kStringLength] = '\0';
 
       // If the address is not all zeros, then use it.
       const uint8_t zero_bdaddr[kBytes] = {0, 0, 0, 0, 0, 0};
-      if ((string_to_bytes(property, local_addr)) &&
+      if ((string_to_bytes(address, local_addr)) &&
           (memcmp(local_addr, zero_bdaddr, kBytes) != 0)) {
-        valid_bda = true;
-        ALOGD("%s: Got Factory BDA %s", __func__, property);
+        ALOGD("%s: Got Factory BDA %s", __func__, address);
+        return true;
+      } else {
+        ALOGE("%s: Got Invalid BDA '%s' from %s", __func__, address, property);
       }
     }
   }
 
   // No BDADDR found in the file. Look for BDA in a factory property.
-  if (!valid_bda && property_get(FACTORY_BDADDR_PROPERTY, property, NULL) &&
+  if (property_get(FACTORY_BDADDR_PROPERTY, property, NULL) &&
       string_to_bytes(property, local_addr)) {
-    valid_bda = true;
+    return true;
   }
 
   // No factory BDADDR found. Look for a previously stored BDA.
-  if (!valid_bda && property_get(PERSIST_BDADDR_PROPERTY, property, NULL) &&
+  if (property_get(PERSIST_BDADDR_PROPERTY, property, NULL) &&
       string_to_bytes(property, local_addr)) {
-    valid_bda = true;
+    return true;
   }
 
-  return valid_bda;
+  return false;
 }
 
 }  // namespace implementation

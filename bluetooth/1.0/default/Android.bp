@@ -15,9 +15,10 @@
 
 cc_library_shared {
     name: "android.hardware.bluetooth@1.0-impl",
+    defaults: ["hidl_defaults"],
+    vendor: true,
     relative_install_path: "hw",
     srcs: [
-        "async_fd_watcher.cc",
         "bluetooth_hci.cc",
         "bluetooth_address.cc",
         "vendor_interface.cc",
@@ -27,16 +28,77 @@ cc_library_shared {
         "libbase",
         "libcutils",
         "libhardware",
-        "libhwbinder",
         "libhidlbase",
         "libhidltransport",
         "liblog",
         "libutils",
     ],
+    static_libs: [
+        "android.hardware.bluetooth-async",
+        "android.hardware.bluetooth-hci",
+    ],
+}
+
+cc_library_static {
+    name: "android.hardware.bluetooth-async",
+    vendor: true,
+    defaults: ["hidl_defaults"],
+    srcs: [
+        "async_fd_watcher.cc",
+    ],
+    export_include_dirs: ["."],
+    shared_libs: [
+        "liblog",
+    ],
+}
+
+cc_library_static {
+    name: "android.hardware.bluetooth-hci",
+    vendor: true,
+    defaults: ["hidl_defaults"],
+    srcs: [
+        "hci_packetizer.cc",
+        "hci_protocol.cc",
+        "h4_protocol.cc",
+        "mct_protocol.cc",
+    ],
+    export_include_dirs: ["."],
+    shared_libs: [
+        "libbase",
+        "libhidlbase",
+        "liblog",
+        "libutils",
+    ],
+}
+
+cc_test {
+    name: "bluetooth-vendor-interface-unit-tests",
+    vendor: true,
+    defaults: ["hidl_defaults"],
+    srcs: [
+        "test/async_fd_watcher_unittest.cc",
+        "test/h4_protocol_unittest.cc",
+        "test/mct_protocol_unittest.cc",
+    ],
+    local_include_dirs: [
+        "test",
+    ],
+    shared_libs: [
+        "libbase",
+        "libhidlbase",
+        "liblog",
+        "libutils",
+    ],
+    static_libs: [
+        "android.hardware.bluetooth-async",
+        "android.hardware.bluetooth-hci",
+        "libgmock",
+    ],
 }
 
 cc_test_host {
-    name: "bluetooth-vendor-interface-unit-tests",
+    name: "bluetooth-address-unit-tests",
+    defaults: ["hidl_defaults"],
     srcs: [
         "bluetooth_address.cc",
         "test/bluetooth_address_test.cc",

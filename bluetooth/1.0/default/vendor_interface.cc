@@ -17,7 +17,6 @@
 #include "vendor_interface.h"
 
 #define LOG_TAG "android.hardware.bluetooth@1.0-impl"
-#include <android-base/logging.h>
 #include <cutils/properties.h>
 #include <utils/Log.h>
 
@@ -25,6 +24,8 @@
 #include <fcntl.h>
 
 #include "bluetooth_address.h"
+#include "h4_protocol.h"
+#include "mct_protocol.h"
 
 static const char* VENDOR_LIBRARY_NAME = "libbt-vendor.so";
 static const char* VENDOR_LIBRARY_SYMBOL_NAME =
@@ -35,28 +36,21 @@ static const int INVALID_FD = -1;
 namespace {
 
 using android::hardware::bluetooth::V1_0::implementation::VendorInterface;
+using android::hardware::hidl_vec;
 
-tINT_CMD_CBACK internal_command_cb;
+struct {
+  tINT_CMD_CBACK cb;
+  uint16_t opcode;
+} internal_command;
+
+// True when LPM is not enabled yet or wake is not asserted.
+bool lpm_wake_deasserted;
+uint32_t lpm_timeout_ms;
+bool recent_activity_flag;
+
 VendorInterface* g_vendor_interface = nullptr;
 
-const size_t preamble_size_for_type[] = {
-    0, HCI_COMMAND_PREAMBLE_SIZE, HCI_ACL_PREAMBLE_SIZE, HCI_SCO_PREAMBLE_SIZE,
-    HCI_EVENT_PREAMBLE_SIZE};
-const size_t packet_length_offset_for_type[] = {
-    0, HCI_LENGTH_OFFSET_CMD, HCI_LENGTH_OFFSET_ACL, HCI_LENGTH_OFFSET_SCO,
-    HCI_LENGTH_OFFSET_EVT};
-
-size_t HciGetPacketLengthForType(
-    HciPacketType type, const android::hardware::hidl_vec<uint8_t>& packet) {
-  size_t offset = packet_length_offset_for_type[type];
-  if (type == HCI_PACKET_TYPE_ACL_DATA) {
-    return (((packet[offset + 1]) << 8) | packet[offset]);
-  }
-  return packet[offset];
-}
-
-HC_BT_HDR* WrapPacketAndCopy(uint16_t event,
-                             const android::hardware::hidl_vec<uint8_t>& data) {
+HC_BT_HDR* WrapPacketAndCopy(uint16_t event, const hidl_vec<uint8_t>& data) {
   size_t packet_size = data.size() + sizeof(HC_BT_HDR);
   HC_BT_HDR* packet = reinterpret_cast<HC_BT_HDR*>(new uint8_t[packet_size]);
   packet->offset = 0;
@@ -69,19 +63,36 @@ HC_BT_HDR* WrapPacketAndCopy(uint16_t event,
   return packet;
 }
 
-uint8_t transmit_cb(uint16_t opcode, void* buffer, tINT_CMD_CBACK callback) {
-  ALOGV("%s opcode: 0x%04x, ptr: %p", __func__, opcode, buffer);
-  HC_BT_HDR* bt_hdr = reinterpret_cast<HC_BT_HDR*>(buffer);
+bool internal_command_event_match(const hidl_vec<uint8_t>& packet) {
+  uint8_t event_code = packet[0];
+  if (event_code != HCI_COMMAND_COMPLETE_EVENT) {
+    ALOGE("%s: Unhandled event type %02X", __func__, event_code);
+    return false;
+  }
 
-  internal_command_cb = callback;
+  size_t opcode_offset = HCI_EVENT_PREAMBLE_SIZE + 1;  // Skip num packets.
+
+  uint16_t opcode = packet[opcode_offset] | (packet[opcode_offset + 1] << 8);
+
+  ALOGV("%s internal_command.opcode = %04X opcode = %04x", __func__,
+        internal_command.opcode, opcode);
+  return opcode == internal_command.opcode;
+}
+
+uint8_t transmit_cb(uint16_t opcode, void* buffer, tINT_CMD_CBACK callback) {
+  ALOGV("%s opcode: 0x%04x, ptr: %p, cb: %p", __func__, opcode, buffer,
+        callback);
+  internal_command.cb = callback;
+  internal_command.opcode = opcode;
   uint8_t type = HCI_PACKET_TYPE_COMMAND;
-  VendorInterface::get()->SendPrivate(&type, 1);
-  VendorInterface::get()->SendPrivate(bt_hdr->data, bt_hdr->len);
+  HC_BT_HDR* bt_hdr = reinterpret_cast<HC_BT_HDR*>(buffer);
+  VendorInterface::get()->Send(type, bt_hdr->data, bt_hdr->len);
+  delete[] reinterpret_cast<uint8_t*>(buffer);
   return true;
 }
 
 void firmware_config_cb(bt_vendor_op_result_t result) {
-  ALOGD("%s result: %d", __func__, result);
+  ALOGV("%s result: %d", __func__, result);
   VendorInterface::get()->OnFirmwareConfigured(result);
 }
 
@@ -131,14 +142,38 @@ namespace bluetooth {
 namespace V1_0 {
 namespace implementation {
 
-bool VendorInterface::Initialize(PacketReadCallback packet_read_cb) {
-  assert(!g_vendor_interface);
+class FirmwareStartupTimer {
+ public:
+  FirmwareStartupTimer() : start_time_(std::chrono::steady_clock::now()) {}
+
+  ~FirmwareStartupTimer() {
+    std::chrono::duration<double> duration =
+        std::chrono::steady_clock::now() - start_time_;
+    double s = duration.count();
+    if (s == 0) return;
+    ALOGI("Firmware configured in %.3fs", s);
+  }
+
+ private:
+  std::chrono::steady_clock::time_point start_time_;
+};
+
+bool VendorInterface::Initialize(
+    InitializeCompleteCallback initialize_complete_cb,
+    PacketReadCallback event_cb, PacketReadCallback acl_cb,
+    PacketReadCallback sco_cb) {
+  if (g_vendor_interface) {
+    ALOGE("%s: No previous Shutdown()?", __func__);
+    return false;
+  }
   g_vendor_interface = new VendorInterface();
-  return g_vendor_interface->Open(packet_read_cb);
+  return g_vendor_interface->Open(initialize_complete_cb, event_cb, acl_cb,
+                                  sco_cb);
 }
 
 void VendorInterface::Shutdown() {
-  CHECK(g_vendor_interface);
+  LOG_ALWAYS_FATAL_IF(!g_vendor_interface, "%s: No Vendor interface!",
+                      __func__);
   g_vendor_interface->Close();
   delete g_vendor_interface;
   g_vendor_interface = nullptr;
@@ -146,9 +181,11 @@ void VendorInterface::Shutdown() {
 
 VendorInterface* VendorInterface::get() { return g_vendor_interface; }
 
-bool VendorInterface::Open(PacketReadCallback packet_read_cb) {
-  firmware_configured_ = false;
-  packet_read_cb_ = packet_read_cb;
+bool VendorInterface::Open(InitializeCompleteCallback initialize_complete_cb,
+                           PacketReadCallback event_cb,
+                           PacketReadCallback acl_cb,
+                           PacketReadCallback sco_cb) {
+  initialize_complete_cb_ = initialize_complete_cb;
 
   // Initialize vendor interface
 
@@ -170,7 +207,9 @@ bool VendorInterface::Open(PacketReadCallback packet_read_cb) {
   // Get the local BD address
 
   uint8_t local_bda[BluetoothAddress::kBytes];
-  CHECK(BluetoothAddress::get_local_address(local_bda));
+  if (!BluetoothAddress::get_local_address(local_bda)) {
+    LOG_ALWAYS_FATAL("%s: No Bluetooth Address!", __func__);
+  }
   int status = lib_interface_->init(&lib_callbacks, (unsigned char*)local_bda);
   if (status) {
     ALOGE("%s unable to initialize vendor library: %d", __func__, status);
@@ -179,49 +218,82 @@ bool VendorInterface::Open(PacketReadCallback packet_read_cb) {
 
   ALOGD("%s vendor library loaded", __func__);
 
-  // Power cycle chip
+  // Power on the controller
 
-  int power_state = BT_VND_PWR_OFF;
-  lib_interface_->op(BT_VND_OP_POWER_CTRL, &power_state);
-  power_state = BT_VND_PWR_ON;
+  int power_state = BT_VND_PWR_ON;
   lib_interface_->op(BT_VND_OP_POWER_CTRL, &power_state);
 
-  // Get the UART socket
+  // Get the UART socket(s)
 
   int fd_list[CH_MAX] = {0};
   int fd_count = lib_interface_->op(BT_VND_OP_USERIAL_OPEN, &fd_list);
 
-  if (fd_count != 1) {
-    ALOGE("%s fd count %d != 1; we can't handle this currently...", __func__,
-          fd_count);
+  if (fd_count < 1 || fd_count > CH_MAX - 1) {
+    ALOGE("%s: fd_count %d is invalid!", __func__, fd_count);
     return false;
   }
 
-  uart_fd_ = fd_list[0];
-  if (uart_fd_ == INVALID_FD) {
-    ALOGE("%s unable to determine UART fd", __func__);
-    return false;
+  for (int i = 0; i < fd_count; i++) {
+    if (fd_list[i] == INVALID_FD) {
+      ALOGE("%s: fd %d is invalid!", __func__, fd_list[i]);
+      return false;
+    }
   }
 
-  ALOGD("%s UART fd: %d", __func__, uart_fd_);
+  event_cb_ = event_cb;
+  PacketReadCallback intercept_events = [this](const hidl_vec<uint8_t>& event) {
+    HandleIncomingEvent(event);
+  };
 
-  fd_watcher_.WatchFdForNonBlockingReads(uart_fd_,
-                                         [this](int fd) { OnDataReady(fd); });
+  if (fd_count == 1) {
+    hci::H4Protocol* h4_hci =
+        new hci::H4Protocol(fd_list[0], intercept_events, acl_cb, sco_cb);
+    fd_watcher_.WatchFdForNonBlockingReads(
+        fd_list[0], [h4_hci](int fd) { h4_hci->OnDataReady(fd); });
+    hci_ = h4_hci;
+  } else {
+    hci::MctProtocol* mct_hci =
+        new hci::MctProtocol(fd_list, intercept_events, acl_cb);
+    fd_watcher_.WatchFdForNonBlockingReads(
+        fd_list[CH_EVT], [mct_hci](int fd) { mct_hci->OnEventDataReady(fd); });
+    fd_watcher_.WatchFdForNonBlockingReads(
+        fd_list[CH_ACL_IN],
+        [mct_hci](int fd) { mct_hci->OnAclDataReady(fd); });
+    hci_ = mct_hci;
+  }
+
+  // Initially, the power management is off.
+  lpm_wake_deasserted = true;
 
   // Start configuring the firmware
+  firmware_startup_timer_ = new FirmwareStartupTimer();
   lib_interface_->op(BT_VND_OP_FW_CFG, nullptr);
 
   return true;
 }
 
 void VendorInterface::Close() {
-  fd_watcher_.StopWatchingFileDescriptor();
+  // These callbacks may send HCI events (vendor-dependent), so make sure to
+  // StopWatching the file descriptor after this.
+  if (lib_interface_ != nullptr) {
+    bt_vendor_lpm_mode_t mode = BT_VND_LPM_DISABLE;
+    lib_interface_->op(BT_VND_OP_LPM_SET_MODE, &mode);
+  }
+
+  fd_watcher_.StopWatchingFileDescriptors();
+
+  if (hci_ != nullptr) {
+    delete hci_;
+    hci_ = nullptr;
+  }
 
   if (lib_interface_ != nullptr) {
     lib_interface_->op(BT_VND_OP_USERIAL_CLOSE, nullptr);
-    uart_fd_ = INVALID_FD;
+
     int power_state = BT_VND_PWR_OFF;
     lib_interface_->op(BT_VND_OP_POWER_CTRL, &power_state);
+
+    lib_interface_->cleanup();
   }
 
   if (lib_handle_ != nullptr) {
@@ -229,123 +301,77 @@ void VendorInterface::Close() {
     lib_handle_ = nullptr;
   }
 
-  firmware_configured_ = false;
+  if (firmware_startup_timer_ != nullptr) {
+    delete firmware_startup_timer_;
+    firmware_startup_timer_ = nullptr;
+  }
 }
 
-size_t VendorInterface::Send(const uint8_t* data, size_t length) {
-  if (firmware_configured_ && queued_data_.size() == 0)
-    return SendPrivate(data, length);
+size_t VendorInterface::Send(uint8_t type, const uint8_t* data, size_t length) {
+  recent_activity_flag = true;
 
-  if (!firmware_configured_) {
-    ALOGI("%s queueing command", __func__);
-    queued_data_.resize(queued_data_.size() + length);
-    uint8_t* append_ptr = &queued_data_[queued_data_.size() - length];
-    memcpy(append_ptr, data, length);
-    return length;
+  if (lpm_wake_deasserted == true) {
+    // Restart the timer.
+    fd_watcher_.ConfigureTimeout(std::chrono::milliseconds(lpm_timeout_ms),
+                                 [this]() { OnTimeout(); });
+    // Assert wake.
+    lpm_wake_deasserted = false;
+    bt_vendor_lpm_wake_state_t wakeState = BT_VND_LPM_WAKE_ASSERT;
+    lib_interface_->op(BT_VND_OP_LPM_WAKE_SET_STATE, &wakeState);
+    ALOGV("%s: Sent wake before (%02x)", __func__, data[0] | (data[1] << 8));
   }
 
-  ALOGI("%s sending queued command", __func__);
-  SendPrivate(queued_data_.data(), queued_data_.size());
-  queued_data_.resize(0);
-
-  ALOGI("%s done sending queued command", __func__);
-
-  return SendPrivate(data, length);
-}
-
-size_t VendorInterface::SendPrivate(const uint8_t* data, size_t length) {
-  if (uart_fd_ == INVALID_FD) return 0;
-
-  size_t transmitted_length = 0;
-  while (length > 0) {
-    ssize_t ret =
-        TEMP_FAILURE_RETRY(write(uart_fd_, data + transmitted_length, length));
-
-    if (ret == -1) {
-      if (errno == EAGAIN) continue;
-      ALOGE("%s error writing to UART (%s)", __func__, strerror(errno));
-      break;
-
-    } else if (ret == 0) {
-      // Nothing written :(
-      ALOGE("%s zero bytes written - something went wrong...", __func__);
-      break;
-    }
-
-    transmitted_length += ret;
-    length -= ret;
-  }
-
-  return transmitted_length;
+  return hci_->Send(type, data, length);
 }
 
 void VendorInterface::OnFirmwareConfigured(uint8_t result) {
-  ALOGI("%s: result = %d", __func__, result);
-  firmware_configured_ = true;
-  VendorInterface::get()->Send(NULL, 0);
+  ALOGD("%s result: %d", __func__, result);
+
+  if (firmware_startup_timer_ != nullptr) {
+    delete firmware_startup_timer_;
+    firmware_startup_timer_ = nullptr;
+  }
+
+  if (initialize_complete_cb_ != nullptr) {
+    initialize_complete_cb_(result == 0);
+    initialize_complete_cb_ = nullptr;
+  }
+
+  lib_interface_->op(BT_VND_OP_GET_LPM_IDLE_TIMEOUT, &lpm_timeout_ms);
+  ALOGI("%s: lpm_timeout_ms %d", __func__, lpm_timeout_ms);
+
+  bt_vendor_lpm_mode_t mode = BT_VND_LPM_ENABLE;
+  lib_interface_->op(BT_VND_OP_LPM_SET_MODE, &mode);
+
+  ALOGD("%s Calling StartLowPowerWatchdog()", __func__);
+  fd_watcher_.ConfigureTimeout(std::chrono::milliseconds(lpm_timeout_ms),
+                               [this]() { OnTimeout(); });
 }
 
-void VendorInterface::OnDataReady(int fd) {
-  switch (hci_parser_state_) {
-    case HCI_IDLE: {
-      uint8_t buffer[1] = {0};
-      size_t bytes_read = TEMP_FAILURE_RETRY(read(fd, buffer, 1));
-      CHECK(bytes_read == 1);
-      hci_packet_type_ = static_cast<HciPacketType>(buffer[0]);
-      // TODO(eisenbach): Check for workaround(s)
-      CHECK(hci_packet_type_ >= HCI_PACKET_TYPE_ACL_DATA &&
-            hci_packet_type_ <= HCI_PACKET_TYPE_EVENT)
-          << "buffer[0] = " << buffer[0];
-      hci_parser_state_ = HCI_TYPE_READY;
-      hci_packet_.resize(HCI_PREAMBLE_SIZE_MAX);
-      hci_packet_bytes_remaining_ = preamble_size_for_type[hci_packet_type_];
-      hci_packet_bytes_read_ = 0;
-      break;
-    }
+void VendorInterface::OnTimeout() {
+  ALOGV("%s", __func__);
+  if (recent_activity_flag == false) {
+    lpm_wake_deasserted = true;
+    bt_vendor_lpm_wake_state_t wakeState = BT_VND_LPM_WAKE_DEASSERT;
+    lib_interface_->op(BT_VND_OP_LPM_WAKE_SET_STATE, &wakeState);
+    fd_watcher_.ConfigureTimeout(std::chrono::seconds(0), []() {
+      ALOGE("Zero timeout! Should never happen.");
+    });
+  }
+  recent_activity_flag = false;
+}
 
-    case HCI_TYPE_READY: {
-      size_t bytes_read = TEMP_FAILURE_RETRY(
-          read(fd, hci_packet_.data() + hci_packet_bytes_read_,
-               hci_packet_bytes_remaining_));
-      CHECK(bytes_read > 0);
-      hci_packet_bytes_remaining_ -= bytes_read;
-      hci_packet_bytes_read_ += bytes_read;
-      if (hci_packet_bytes_remaining_ == 0) {
-        size_t packet_length =
-            HciGetPacketLengthForType(hci_packet_type_, hci_packet_);
-        hci_packet_.resize(preamble_size_for_type[hci_packet_type_] +
-                           packet_length);
-        hci_packet_bytes_remaining_ = packet_length;
-        hci_parser_state_ = HCI_PAYLOAD;
-        hci_packet_bytes_read_ = 0;
-      }
-      break;
-    }
+void VendorInterface::HandleIncomingEvent(const hidl_vec<uint8_t>& hci_packet) {
+  if (internal_command.cb != nullptr &&
+      internal_command_event_match(hci_packet)) {
+    HC_BT_HDR* bt_hdr = WrapPacketAndCopy(HCI_PACKET_TYPE_EVENT, hci_packet);
 
-    case HCI_PAYLOAD: {
-      size_t bytes_read = TEMP_FAILURE_RETRY(
-          read(fd,
-               hci_packet_.data() + preamble_size_for_type[hci_packet_type_] +
-                   hci_packet_bytes_read_,
-               hci_packet_bytes_remaining_));
-      hci_packet_bytes_remaining_ -= bytes_read;
-      hci_packet_bytes_read_ += bytes_read;
-      if (hci_packet_bytes_remaining_ == 0) {
-        if (firmware_configured_) {
-          if (packet_read_cb_ != nullptr) {
-            packet_read_cb_(hci_packet_type_, hci_packet_);
-          }
-        } else {
-          if (internal_command_cb != nullptr) {
-            HC_BT_HDR* bt_hdr =
-                WrapPacketAndCopy(HCI_PACKET_TYPE_EVENT, hci_packet_);
-            internal_command_cb(bt_hdr);
-          }
-        }
-        hci_parser_state_ = HCI_IDLE;
-      }
-      break;
-    }
+    // The callbacks can send new commands, so don't zero after calling.
+    tINT_CMD_CBACK saved_cb = internal_command.cb;
+    internal_command.cb = nullptr;
+    saved_cb(bt_hdr);
+  } else {
+    event_cb_(hci_packet);
   }
 }
 

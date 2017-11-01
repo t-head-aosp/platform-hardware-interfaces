@@ -16,16 +16,17 @@
 
 #pragma once
 
+#include <map>
 #include <mutex>
 #include <thread>
 
 namespace android {
 namespace hardware {
 namespace bluetooth {
-namespace V1_0 {
-namespace implementation {
+namespace async {
 
 using ReadCallback = std::function<void(int)>;
+using TimeoutCallback = std::function<void(void)>;
 
 class AsyncFdWatcher {
  public:
@@ -34,7 +35,9 @@ class AsyncFdWatcher {
 
   int WatchFdForNonBlockingReads(int file_descriptor,
                                  const ReadCallback& on_read_fd_ready_callback);
-  void StopWatchingFileDescriptor();
+  int ConfigureTimeout(const std::chrono::milliseconds timeout,
+                       const TimeoutCallback& on_timeout_callback);
+  void StopWatchingFileDescriptors();
 
  private:
   AsyncFdWatcher(const AsyncFdWatcher&) = delete;
@@ -48,16 +51,17 @@ class AsyncFdWatcher {
   std::atomic_bool running_{false};
   std::thread thread_;
   std::mutex internal_mutex_;
+  std::mutex timeout_mutex_;
 
-  int read_fd_;
+  std::map<int, ReadCallback> watched_fds_;
   int notification_listen_fd_;
   int notification_write_fd_;
-  ReadCallback cb_;
+  TimeoutCallback timeout_cb_;
+  std::chrono::milliseconds timeout_ms_;
 };
 
 
-} // namespace implementation
-} // namespace V1_0
+} // namespace async
 } // namespace bluetooth
 } // namespace hardware
 } // namespace android

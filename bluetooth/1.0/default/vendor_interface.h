@@ -20,7 +20,7 @@
 
 #include "async_fd_watcher.h"
 #include "bt_vendor_lib.h"
-#include "hci_internals.h"
+#include "hci_protocol.h"
 
 namespace android {
 namespace hardware {
@@ -29,55 +29,48 @@ namespace V1_0 {
 namespace implementation {
 
 using ::android::hardware::hidl_vec;
-using PacketReadCallback =
-    std::function<void(HciPacketType, const hidl_vec<uint8_t> &)>;
+using InitializeCompleteCallback = std::function<void(bool success)>;
+using PacketReadCallback = std::function<void(const hidl_vec<uint8_t>&)>;
+
+class FirmwareStartupTimer;
 
 class VendorInterface {
  public:
-  static bool Initialize(PacketReadCallback packet_read_cb);
+  static bool Initialize(InitializeCompleteCallback initialize_complete_cb,
+                         PacketReadCallback event_cb, PacketReadCallback acl_cb,
+                         PacketReadCallback sco_cb);
   static void Shutdown();
-  static VendorInterface* get();
+  static VendorInterface *get();
 
-  size_t Send(const uint8_t *data, size_t length);
+  size_t Send(uint8_t type, const uint8_t *data, size_t length);
 
   void OnFirmwareConfigured(uint8_t result);
 
-  // Actually send the data.
-  size_t SendPrivate(const uint8_t *data, size_t length);
-
  private:
-  VendorInterface() { queued_data_.resize(0); }
   virtual ~VendorInterface() = default;
 
-  bool Open(PacketReadCallback packet_read_cb);
+  bool Open(InitializeCompleteCallback initialize_complete_cb,
+            PacketReadCallback event_cb, PacketReadCallback acl_cb,
+            PacketReadCallback sco_cb);
   void Close();
 
-  void OnDataReady(int fd);
+  void OnTimeout();
 
-  // Queue data from Send() until the interface is ready.
-  hidl_vec<uint8_t> queued_data_;
+  void HandleIncomingEvent(const hidl_vec<uint8_t>& hci_packet);
 
   void *lib_handle_;
   bt_vendor_interface_t *lib_interface_;
-  AsyncFdWatcher fd_watcher_;
-  int uart_fd_;
-  PacketReadCallback packet_read_cb_;
-  bool firmware_configured_;
+  async::AsyncFdWatcher fd_watcher_;
+  InitializeCompleteCallback initialize_complete_cb_;
+  hci::HciProtocol* hci_;
 
-  enum HciParserState {
-    HCI_IDLE,
-    HCI_TYPE_READY,
-    HCI_PAYLOAD
-  };
-  HciParserState hci_parser_state_{HCI_IDLE};
-  HciPacketType hci_packet_type_{HCI_PACKET_TYPE_UNKNOWN};
-  hidl_vec<uint8_t> hci_packet_;
-  size_t hci_packet_bytes_remaining_;
-  size_t hci_packet_bytes_read_;
+  PacketReadCallback event_cb_;
+
+  FirmwareStartupTimer *firmware_startup_timer_;
 };
 
-} // namespace implementation
-} // namespace V1_0
-} // namespace bluetooth
-} // namespace hardware
-} // namespace android
+}  // namespace implementation
+}  // namespace V1_0
+}  // namespace bluetooth
+}  // namespace hardware
+}  // namespace android

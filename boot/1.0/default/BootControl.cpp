@@ -1,3 +1,18 @@
+/*
+ * Copyright (C) 2016 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #define LOG_TAG "android.hardware.boot@1.0-impl"
 
 #include <log/log.h>
@@ -78,14 +93,14 @@ Return<void> BootControl::getSuffix(uint32_t slot, getSuffix_cb _hidl_cb)  {
 }
 
 
-IBootControl* HIDL_FETCH_IBootControl(const char* hal) {
+IBootControl* HIDL_FETCH_IBootControl(const char* /* hal */) {
     int ret = 0;
     boot_control_module_t* module = NULL;
     hw_module_t **hwm = reinterpret_cast<hw_module_t**>(&module);
-    ret = hw_get_module(hal, const_cast<const hw_module_t**>(hwm));
+    ret = hw_get_module(BOOT_CONTROL_HARDWARE_MODULE_ID, const_cast<const hw_module_t**>(hwm));
     if (ret)
     {
-        ALOGE("hw_get_module %s failed: %d", hal, ret);
+        ALOGE("hw_get_module %s failed: %d", BOOT_CONTROL_HARDWARE_MODULE_ID, ret);
         return nullptr;
     }
     module->init(module);

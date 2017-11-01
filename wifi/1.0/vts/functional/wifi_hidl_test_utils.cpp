@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
-#include <gtest/gtest.h>
+#include <VtsHalHidlTargetTestBase.h>
 
+#include "wifi_hidl_call_util.h"
 #include "wifi_hidl_test_utils.h"
 
 using ::android::hardware::wifi::V1_0::IWifi;
@@ -34,17 +35,58 @@ using ::android::sp;
 using ::android::hardware::hidl_string;
 using ::android::hardware::hidl_vec;
 
-const char kWifiServiceName[] = "wifi";
+namespace {
+constexpr uint32_t kHalStartRetryMaxCount = 5;
+constexpr uint32_t kHalStartRetryIntervalInMs = 2;
 
-void stopFramework() {
-    ASSERT_EQ(std::system("svc wifi disable"), 0);
-    sleep(5);
+bool findAnyModeSupportingIfaceType(
+    IfaceType desired_type, const std::vector<IWifiChip::ChipMode>& modes,
+    ChipModeId* mode_id) {
+    for (const auto& mode : modes) {
+        for (const auto& combination : mode.availableCombinations) {
+            for (const auto& iface_limit : combination.limits) {
+                const auto& iface_types = iface_limit.types;
+                if (std::find(iface_types.begin(), iface_types.end(),
+                              desired_type) != iface_types.end()) {
+                    *mode_id = mode.id;
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
-void startFramework() { ASSERT_EQ(std::system("svc wifi enable"), 0); }
+bool configureChipToSupportIfaceTypeInternal(const sp<IWifiChip>& wifi_chip,
+                                             IfaceType type,
+                                             ChipModeId* configured_mode_id) {
+    if (!configured_mode_id) {
+        return false;
+    }
+    const auto& status_and_modes = HIDL_INVOKE(wifi_chip, getAvailableModes);
+    if (status_and_modes.first.code != WifiStatusCode::SUCCESS) {
+        return false;
+    }
+    if (!findAnyModeSupportingIfaceType(type, status_and_modes.second,
+                                        configured_mode_id)) {
+        return false;
+    }
+    if (HIDL_INVOKE(wifi_chip, configureChip, *configured_mode_id).code !=
+        WifiStatusCode::SUCCESS) {
+        return false;
+    }
+    return true;
+}
+
+bool configureChipToSupportIfaceTypeInternal(const sp<IWifiChip>& wifi_chip,
+                                             IfaceType type) {
+    ChipModeId mode_id;
+    return configureChipToSupportIfaceTypeInternal(wifi_chip, type, &mode_id);
+}
+}  // namespace
 
 sp<IWifi> getWifi() {
-    sp<IWifi> wifi = IWifi::getService(kWifiServiceName);
+    sp<IWifi> wifi = ::testing::VtsHalHidlTargetTestBase::getService<IWifi>();
     return wifi;
 }
 
@@ -53,98 +95,28 @@ sp<IWifiChip> getWifiChip() {
     if (!wifi.get()) {
         return nullptr;
     }
-
-    bool operation_failed = false;
-    wifi->start([&](WifiStatus status) {
-        if (status.code != WifiStatusCode::SUCCESS) {
-            operation_failed = true;
-        }
-    });
-    if (operation_failed) {
+    uint32_t retry_count = 0;
+    auto status = HIDL_INVOKE(wifi, start);
+    while (retry_count < kHalStartRetryMaxCount &&
+           status.code == WifiStatusCode::ERROR_NOT_AVAILABLE) {
+        retry_count++;
+        usleep(kHalStartRetryIntervalInMs * 1000);
+        status = HIDL_INVOKE(wifi, start);
+    }
+    if (status.code != WifiStatusCode::SUCCESS) {
         return nullptr;
     }
-
-    std::vector<ChipId> wifi_chip_ids;
-    wifi->getChipIds(
-        [&](const WifiStatus& status, const hidl_vec<ChipId>& chip_ids) {
-            if (status.code != WifiStatusCode::SUCCESS) {
-                operation_failed = true;
-            }
-            wifi_chip_ids = chip_ids;
-        });
-    // We don't expect more than 1 chip currently.
-    if (operation_failed || wifi_chip_ids.size() != 1) {
+    const auto& status_and_chip_ids = HIDL_INVOKE(wifi, getChipIds);
+    const auto& chip_ids = status_and_chip_ids.second;
+    if (status_and_chip_ids.first.code != WifiStatusCode::SUCCESS ||
+        chip_ids.size() != 1) {
         return nullptr;
     }
-
-    sp<IWifiChip> wifi_chip;
-    wifi->getChip(wifi_chip_ids[0],
-                  [&](const WifiStatus& status, const sp<IWifiChip>& chip) {
-                      if (status.code != WifiStatusCode::SUCCESS) {
-                          operation_failed = true;
-                      }
-                      wifi_chip = chip;
-                  });
-    if (operation_failed) {
+    const auto& status_and_chip = HIDL_INVOKE(wifi, getChip, chip_ids[0]);
+    if (status_and_chip.first.code != WifiStatusCode::SUCCESS) {
         return nullptr;
     }
-    return wifi_chip;
-}
-
-// Since we currently only support one iface of each type. Just iterate thru the
-// modes of operation and find the mode ID to use for that iface type.
-bool findModeToSupportIfaceType(IfaceType type,
-                                const std::vector<IWifiChip::ChipMode>& modes,
-                                ChipModeId* mode_id) {
-    for (const auto& mode : modes) {
-        std::vector<IWifiChip::ChipIfaceCombination> combinations =
-            mode.availableCombinations;
-        for (const auto& combination : combinations) {
-            std::vector<IWifiChip::ChipIfaceCombinationLimit> iface_limits =
-                combination.limits;
-            for (const auto& iface_limit : iface_limits) {
-                std::vector<IfaceType> iface_types = iface_limit.types;
-                for (const auto& iface_type : iface_types) {
-                    if (iface_type == type) {
-                        *mode_id = mode.id;
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-    return false;
-}
-
-bool configureChipToSupportIfaceType(const sp<IWifiChip>& wifi_chip,
-                                     IfaceType type) {
-    bool operation_failed = false;
-    std::vector<IWifiChip::ChipMode> chip_modes;
-    wifi_chip->getAvailableModes(
-        [&](WifiStatus status, const hidl_vec<IWifiChip::ChipMode>& modes) {
-            if (status.code != WifiStatusCode::SUCCESS) {
-                operation_failed = true;
-            }
-            chip_modes = modes;
-        });
-    if (operation_failed) {
-        return false;
-    }
-
-    ChipModeId mode_id;
-    if (!findModeToSupportIfaceType(type, chip_modes, &mode_id)) {
-        return false;
-    }
-
-    wifi_chip->configureChip(mode_id, [&](WifiStatus status) {
-        if (status.code != WifiStatusCode::SUCCESS) {
-            operation_failed = true;
-        }
-    });
-    if (operation_failed) {
-        return false;
-    }
-    return true;
+    return status_and_chip.second;
 }
 
 sp<IWifiApIface> getWifiApIface() {
@@ -152,23 +124,14 @@ sp<IWifiApIface> getWifiApIface() {
     if (!wifi_chip.get()) {
         return nullptr;
     }
-    if (!configureChipToSupportIfaceType(wifi_chip, IfaceType::AP)) {
+    if (!configureChipToSupportIfaceTypeInternal(wifi_chip, IfaceType::AP)) {
         return nullptr;
     }
-
-    bool operation_failed = false;
-    sp<IWifiApIface> wifi_ap_iface;
-    wifi_chip->createApIface(
-        [&](const WifiStatus& status, const sp<IWifiApIface>& iface) {
-            if (status.code != WifiStatusCode::SUCCESS) {
-                operation_failed = true;
-            }
-            wifi_ap_iface = iface;
-        });
-    if (operation_failed) {
+    const auto& status_and_iface = HIDL_INVOKE(wifi_chip, createApIface);
+    if (status_and_iface.first.code != WifiStatusCode::SUCCESS) {
         return nullptr;
     }
-    return wifi_ap_iface;
+    return status_and_iface.second;
 }
 
 sp<IWifiNanIface> getWifiNanIface() {
@@ -176,23 +139,14 @@ sp<IWifiNanIface> getWifiNanIface() {
     if (!wifi_chip.get()) {
         return nullptr;
     }
-    if (!configureChipToSupportIfaceType(wifi_chip, IfaceType::NAN)) {
+    if (!configureChipToSupportIfaceTypeInternal(wifi_chip, IfaceType::NAN)) {
         return nullptr;
     }
-
-    bool operation_failed = false;
-    sp<IWifiNanIface> wifi_nan_iface;
-    wifi_chip->createNanIface(
-        [&](const WifiStatus& status, const sp<IWifiNanIface>& iface) {
-            if (status.code != WifiStatusCode::SUCCESS) {
-                operation_failed = true;
-            }
-            wifi_nan_iface = iface;
-        });
-    if (operation_failed) {
+    const auto& status_and_iface = HIDL_INVOKE(wifi_chip, createNanIface);
+    if (status_and_iface.first.code != WifiStatusCode::SUCCESS) {
         return nullptr;
     }
-    return wifi_nan_iface;
+    return status_and_iface.second;
 }
 
 sp<IWifiP2pIface> getWifiP2pIface() {
@@ -200,23 +154,14 @@ sp<IWifiP2pIface> getWifiP2pIface() {
     if (!wifi_chip.get()) {
         return nullptr;
     }
-    if (!configureChipToSupportIfaceType(wifi_chip, IfaceType::P2P)) {
+    if (!configureChipToSupportIfaceTypeInternal(wifi_chip, IfaceType::P2P)) {
         return nullptr;
     }
-
-    bool operation_failed = false;
-    sp<IWifiP2pIface> wifi_p2p_iface;
-    wifi_chip->createP2pIface(
-        [&](const WifiStatus& status, const sp<IWifiP2pIface>& iface) {
-            if (status.code != WifiStatusCode::SUCCESS) {
-                operation_failed = true;
-            }
-            wifi_p2p_iface = iface;
-        });
-    if (operation_failed) {
+    const auto& status_and_iface = HIDL_INVOKE(wifi_chip, createP2pIface);
+    if (status_and_iface.first.code != WifiStatusCode::SUCCESS) {
         return nullptr;
     }
-    return wifi_p2p_iface;
+    return status_and_iface.second;
 }
 
 sp<IWifiStaIface> getWifiStaIface() {
@@ -224,23 +169,14 @@ sp<IWifiStaIface> getWifiStaIface() {
     if (!wifi_chip.get()) {
         return nullptr;
     }
-    if (!configureChipToSupportIfaceType(wifi_chip, IfaceType::STA)) {
+    if (!configureChipToSupportIfaceTypeInternal(wifi_chip, IfaceType::STA)) {
         return nullptr;
     }
-
-    bool operation_failed = false;
-    sp<IWifiStaIface> wifi_sta_iface;
-    wifi_chip->createStaIface(
-        [&](const WifiStatus& status, const sp<IWifiStaIface>& iface) {
-            if (status.code != WifiStatusCode::SUCCESS) {
-                operation_failed = true;
-            }
-            wifi_sta_iface = iface;
-        });
-    if (operation_failed) {
+    const auto& status_and_iface = HIDL_INVOKE(wifi_chip, createStaIface);
+    if (status_and_iface.first.code != WifiStatusCode::SUCCESS) {
         return nullptr;
     }
-    return wifi_sta_iface;
+    return status_and_iface.second;
 }
 
 sp<IWifiRttController> getWifiRttController() {
@@ -252,27 +188,25 @@ sp<IWifiRttController> getWifiRttController() {
     if (!wifi_sta_iface.get()) {
         return nullptr;
     }
-
-    bool operation_failed = false;
-    sp<IWifiRttController> wifi_rtt_controller;
-    wifi_chip->createRttController(
-        wifi_sta_iface, [&](const WifiStatus& status,
-                            const sp<IWifiRttController>& controller) {
-            if (status.code != WifiStatusCode::SUCCESS) {
-                operation_failed = true;
-            }
-            wifi_rtt_controller = controller;
-        });
-    if (operation_failed) {
+    const auto& status_and_controller =
+        HIDL_INVOKE(wifi_chip, createRttController, wifi_sta_iface);
+    if (status_and_controller.first.code != WifiStatusCode::SUCCESS) {
         return nullptr;
     }
-    return wifi_rtt_controller;
+    return status_and_controller.second;
+}
+
+bool configureChipToSupportIfaceType(const sp<IWifiChip>& wifi_chip,
+                                     IfaceType type,
+                                     ChipModeId* configured_mode_id) {
+    return configureChipToSupportIfaceTypeInternal(wifi_chip, type,
+                                                   configured_mode_id);
 }
 
 void stopWifi() {
     sp<IWifi> wifi = getWifi();
     ASSERT_NE(wifi, nullptr);
-    wifi->stop([](const WifiStatus& status) {
-        ASSERT_EQ(status.code, WifiStatusCode::SUCCESS);
-    });
+    const auto status = HIDL_INVOKE(wifi, stop);
+    ASSERT_TRUE((status.code == WifiStatusCode::SUCCESS) ||
+                (status.code == WifiStatusCode::ERROR_NOT_AVAILABLE));
 }

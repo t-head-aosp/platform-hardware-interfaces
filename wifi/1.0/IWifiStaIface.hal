@@ -81,9 +81,17 @@ interface IWifiStaIface extends IWifiIface {
      */
     TDLS_OFFCHANNEL = 1 << 11,
     /**
+     * Support for neighbour discovery offload.
+     */
+    ND_OFFLOAD = 1 << 12,
+    /**
+     * Support for keep alive packet offload.
+     */
+    KEEP_ALIVE = 1 << 13,
+    /**
      * Support for tracking connection packets' fate.
      */
-    DEBUG_PACKET_FATE = 1 << 12
+    DEBUG_PACKET_FATE = 1 << 14
   };
 
   /**
@@ -112,7 +120,9 @@ interface IWifiStaIface extends IWifiIface {
    *         |WifiStatusCode.ERROR_UNKNOWN|
    * @return capabilities Bitset of |StaIfaceCapabilityMask| values.
    */
-  getCapabilities() generates (WifiStatus status, uint32_t capabilities);
+  getCapabilities()
+      generates (WifiStatus status,
+                 bitfield<StaIfaceCapabilityMask> capabilities);
 
   /**
    * Used to query additional information about the chip's APF capabilities.
@@ -134,6 +144,31 @@ interface IWifiStaIface extends IWifiIface {
    * Installs an APF program on this iface, replacing an existing
    * program if present.
    * Must fail if |StaIfaceCapabilityMask.APF| is not set.
+   *
+   * APF docs
+   * ==========================================================================
+   * APF functionality, instructions and bytecode/binary format is described in:
+   * http://android.googlesource.com/platform/hardware/google/apf/
+   * +/b75c9f3714cfae3dad3d976958e063150781437e/apf.h
+   *
+   * The interpreter API is described here:
+   * http://android.googlesource.com/platform/hardware/google/apf/+/
+   * b75c9f3714cfae3dad3d976958e063150781437e/apf_interpreter.h#32
+   *
+   * The assembler/generator API is described in javadocs here:
+   * http://android.googlesource.com/platform/frameworks/base/+/
+   * 4456f33a958a7f09e608399da83c4d12b2e7d191/services/net/java/android/net/
+   * apf/ApfGenerator.java
+   *
+   * Disassembler usage is described here:
+   * http://android.googlesource.com/platform/hardware/google/apf/+/
+   * b75c9f3714cfae3dad3d976958e063150781437e/apf_disassembler.c#65
+   *
+   * The BPF to APF translator usage is described here:
+   * http://android.googlesource.com/platform/frameworks/base/+/
+   * 4456f33a958a7f09e608399da83c4d12b2e7d191/tests/net/java/android/net/
+   * apf/Bpf2Apf.java
+   * ==========================================================================
    *
    * @param cmdId command Id to use for this invocation.
    * @param APF Program to be set.
@@ -170,7 +205,6 @@ interface IWifiStaIface extends IWifiIface {
    * for the provided band. These channels may be specifed in the
    * |BackgroundScanBucketParameters.frequenciesInMhz| for a background scan
    * request.
-   * Must fail if |StaIfaceCapabilityMask.BACKGROUND_SCAN| is not set.
    *
    * @param band Band for which the frequency list is being generated.
    * @return status WifiStatus of the operation.
@@ -182,7 +216,7 @@ interface IWifiStaIface extends IWifiIface {
    *         |WifiStatusCode.ERROR_UNKNOWN|
    * @return frequencies vector of valid frequencies for the provided band.
    */
-  getValidFrequenciesForBackgroundScan(StaBackgroundScanBand band)
+  getValidFrequenciesForBand(WifiBand band)
       generates (WifiStatus status, vec<WifiChannelInMhz> frequencies);
 
   /**
@@ -379,8 +413,71 @@ interface IWifiStaIface extends IWifiIface {
   setRoamingState(StaRoamingState state) generates (WifiStatus status);
 
   /**
+   * Enable/Disable Neighbour discovery offload functionality in the firmware.
+   *
+   * @param enable true to enable, false to disable.
+   * @return status WifiStatus of the operation.
+   *         Possible status codes:
+   *         |WifiStatusCode.SUCCESS|,
+   *         |WifiStatusCode.ERROR_WIFI_IFACE_INVALID|,
+   *         |WifiStatusCode.ERROR_UNKNOWN|
+   */
+  enableNdOffload(bool enable) generates (WifiStatus status);
+
+  /**
+   * Start sending the specified keep alive packets periodically.
+   *
+   * @param cmdId command Id to use for this invocation.
+   * @param ipPacketData IP packet contents to be transmitted.
+   * @param etherType 16 bit ether type to be set in the ethernet frame
+   *        transmitted.
+   * @param srcAddress Source MAC address of the packet.
+   * @param dstAddress Destination MAC address of the packet.
+   * @param periodInMs Interval at which this packet must be transmitted.
+   * @return status WifiStatus of the operation.
+   *         Possible status codes:
+   *         |WifiStatusCode.SUCCESS|,
+   *         |WifiStatusCode.ERROR_WIFI_IFACE_INVALID|,
+   *         |WifiStatusCode.ERROR_NOT_SUPPORTED|,
+   *         |WifiStatusCode.ERROR_NOT_AVAILABLE|,
+   *         |WifiStatusCode.ERROR_UNKNOWN|
+   */
+  startSendingKeepAlivePackets(
+      CommandId cmdId, vec<uint8_t> ipPacketData, uint16_t etherType,
+      MacAddress srcAddress, MacAddress dstAddress, uint32_t periodInMs)
+      generates (WifiStatus status);
+
+  /**
+   * Stop sending the specified keep alive packets.
+   *
+   * @param cmdId command Id corresponding to the request.
+   * @return status WifiStatus of the operation.
+   *         Possible status codes:
+   *         |WifiStatusCode.SUCCESS|,
+   *         |WifiStatusCode.ERROR_WIFI_IFACE_INVALID|,
+   *         |WifiStatusCode.ERROR_NOT_SUPPORTED|,
+   *         |WifiStatusCode.ERROR_NOT_AVAILABLE|,
+   *         |WifiStatusCode.ERROR_UNKNOWN|
+   */
+  stopSendingKeepAlivePackets(CommandId cmdId) generates (WifiStatus status);
+
+  /**
+   * Set the MAC OUI during scanning.
+   * An OUI {Organizationally Unique Identifier} is a 24-bit number that
+   * uniquely identifies a vendor or manufacturer.
+   *
+   * @return status WifiStatus of the operation.
+   *         Possible status codes:
+   *         |WifiStatusCode.SUCCESS|,
+   *         |WifiStatusCode.ERROR_WIFI_IFACE_INVALID|,
+   *         |WifiStatusCode.ERROR_UNKNOWN|
+   */
+  setScanningMacOui(uint8_t[3] oui) generates (WifiStatus status);
+
+  /**
    * API to start packet fate monitoring.
-   * - Once stared, monitoring must remain active until HAL is unloaded.
+   * - Once started, monitoring must remain active until HAL is stopped or the
+   *   chip is reconfigured.
    * - When HAL is unloaded, all packet fate buffers must be cleared.
    * - The packet fates are used to monitor the state of packets transmitted/
    *   received during association.
@@ -394,20 +491,6 @@ interface IWifiStaIface extends IWifiIface {
    *         |WifiStatusCode.ERROR_UNKNOWN|
    */
   startDebugPacketFateMonitoring() generates (WifiStatus status);
-
-  /**
-   * API to stop packet fate monitoring.
-   *
-   * @return status WifiStatus of the operation.
-   *         Possible status codes:
-   *         |WifiStatusCode.SUCCESS|,
-   *         |WifiStatusCode.ERROR_WIFI_IFACE_INVALID|,
-   *         |WifiStatusCode.ERROR_NOT_SUPPORTED|,
-   *         |WifiStatusCode.ERROR_NOT_STARTED|,
-   *         |WifiStatusCode.ERROR_NOT_AVAILABLE|,
-   *         |WifiStatusCode.ERROR_UNKNOWN|
-   */
-  stopDebugPacketFateMonitoring() generates (WifiStatus status);
 
   /**
    * API to retrieve fates of outbound packets.

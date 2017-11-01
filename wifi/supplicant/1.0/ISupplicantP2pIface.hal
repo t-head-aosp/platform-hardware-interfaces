@@ -40,16 +40,6 @@ interface ISupplicantP2pIface extends ISupplicantIface {
     KEYPAD
   };
 
-  enum GroupCapabilityMask : uint32_t {
-    GROUP_OWNER = 1 << 0,
-    PERSISTENT_GROUP = 1 << 1,
-    GROUP_LIMIT = 1 << 2,
-    INTRA_BSS_DIST = 1 << 3,
-    CROSS_CONN = 1 << 4,
-    PERSISTENT_RECONN = 1 << 5,
-    GROUP_FORMATION = 1 << 6
-  };
-
   /**
    * Use to specify a range of frequencies.
    * For example: 2412-2432,2462,5000-6000, etc.
@@ -164,6 +154,7 @@ interface ISupplicantP2pIface extends ISupplicantIface {
    *         |SupplicantStatusCode.SUCCESS|,
    *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
    *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
+   *         |SupplicantStatusCode.FAILURE_IFACE_DISABLED|
    */
   find(uint32_t timeoutInSec) generates (SupplicantStatus status);
 
@@ -175,6 +166,7 @@ interface ISupplicantP2pIface extends ISupplicantIface {
    *         |SupplicantStatusCode.SUCCESS|,
    *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
    *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
+   *         |SupplicantStatusCode.FAILURE_IFACE_DISABLED|
    */
   stopFind() generates (SupplicantStatus status);
 
@@ -261,12 +253,12 @@ interface ISupplicantP2pIface extends ISupplicantIface {
   /**
    * Set up a P2P group owner manually (i.e., without group owner
    * negotiation with a specific peer). This is also known as autonomous
-   * group owner. Optional |persistent| may be used to specify restart of a
-   * persistent group.
+   * group owner. Optional |persistentNetworkId| may be used to specify
+   * restart of a persistent group.
    *
    * @param persistent Used to request a persistent group to be formed.
    * @param persistentNetworkId Used to specify the restart of a persistent
-   *        group.
+   *        group. Set to UINT32_MAX for a non-persistent group.
    * @return status Status of the operation.
    *         Possible status codes:
    *         |SupplicantStatusCode.SUCCESS|,
@@ -302,6 +294,7 @@ interface ISupplicantP2pIface extends ISupplicantIface {
    *         |SupplicantStatusCode.SUCCESS|,
    *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
    *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
+   *         |SupplicantStatusCode.FAILURE_IFACE_DISABLED|
    */
   reject(MacAddress peerAddress) generates (SupplicantStatus status);
 
@@ -420,10 +413,11 @@ interface ISupplicantP2pIface extends ISupplicantIface {
    *         |SupplicantStatusCode.SUCCESS|,
    *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
    *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
-   * @return capabilityMask Combination of |GroupCapabilityMask| values.
+   * @return capabilityMask Combination of |P2pGroupCapabilityMask| values.
    */
   getGroupCapability(MacAddress peerAddress)
-      generates (SupplicantStatus status, uint32_t capabilities);
+      generates (SupplicantStatus status,
+                 bitfield<P2pGroupCapabilityMask> capabilities);
 
   /**
    * This command can be used to add a bonjour service.
@@ -533,8 +527,163 @@ interface ISupplicantP2pIface extends ISupplicantIface {
    * @return status Status of the operation.
    *         Possible status codes:
    *         |SupplicantStatusCode.SUCCESS|,
-   *         |SupplicantStatusCode.FAILURE_UNKNOWN|
+   *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
+   *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
    */
   setMiracastMode(MiracastMode mode)
       generates (SupplicantStatus status);
+
+  /**
+   * Initiate WPS Push Button setup.
+   * The PBC operation requires that a button is also pressed at the
+   * AP/Registrar at about the same time (2 minute window).
+   *
+   * @param groupIfName Group interface name to use.
+   * @param bssid BSSID of the AP. Use zero'ed bssid to indicate wildcard.
+   * @return status Status of the operation.
+   *         Possible status codes:
+   *         |SupplicantStatusCode.SUCCESS|,
+   *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
+   *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
+   */
+  startWpsPbc(string groupIfName, Bssid bssid)
+      generates (SupplicantStatus status);
+
+  /**
+   * Initiate WPS Pin Keypad setup.
+   *
+   * @param groupIfName Group interface name to use.
+   * @param pin 8 digit pin to be used.
+   * @return status Status of the operation.
+   *         Possible status codes:
+   *         |SupplicantStatusCode.SUCCESS|,
+   *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
+   *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
+   */
+  startWpsPinKeypad(string groupIfName, string pin)
+      generates (SupplicantStatus status);
+
+  /**
+   * Initiate WPS Pin Display setup.
+   *
+   * @param groupIfName Group interface name to use.
+   * @param bssid BSSID of the AP. Use zero'ed bssid to indicate wildcard.
+   * @return status Status of the operation.
+   *         Possible status codes:
+   *         |SupplicantStatusCode.SUCCESS|,
+   *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
+   *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
+   * @return generatedPin 8 digit pin generated.
+   */
+  startWpsPinDisplay(string groupIfName, Bssid bssid)
+      generates (SupplicantStatus status, string generatedPin);
+
+  /**
+   * Cancel any ongoing WPS operations.
+   *
+   * @param groupIfName Group interface name to use.
+   * @return status Status of the operation.
+   *         Possible status codes:
+   *         |SupplicantStatusCode.SUCCESS|,
+   *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
+   *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
+
+   */
+  cancelWps(string groupIfName) generates (SupplicantStatus status);
+
+  /**
+   * Enable/Disable Wifi Display.
+   *
+   * @param enable true to enable, false to disable.
+   * @return status Status of the operation.
+   *         Possible status codes:
+   *         |SupplicantStatusCode.SUCCESS|,
+   *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
+   *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
+   */
+  enableWfd(bool enable) generates (SupplicantStatus status);
+
+  /**
+   * Set Wifi Display device info.
+   *
+   * @param info WFD device info as described in section 5.1.2 of WFD technical
+   *        specification v1.0.0.
+   * @return status Status of the operation.
+   *         Possible status codes:
+   *         |SupplicantStatusCode.SUCCESS|,
+   *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
+   *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
+   */
+  setWfdDeviceInfo(uint8_t[6] info) generates (SupplicantStatus status);
+
+  /**
+   * Creates a NFC handover request message.
+   *
+   * @return status Status of the operation.
+   *         Possible status codes:
+   *         |SupplicantStatusCode.SUCCESS|,
+   *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
+   *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
+   * @return request Bytes representing the handover request as specified in
+   *         section 3.1.1 of NFC Connection Handover 1.2 Technical
+   *         Specification.
+   */
+  createNfcHandoverRequestMessage()
+      generates (SupplicantStatus status, vec<uint8_t> request);
+
+  /**
+   * Creates a NFC handover select message.
+   *
+   * @return status Status of the operation.
+   *         Possible status codes:
+   *         |SupplicantStatusCode.SUCCESS|,
+   *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
+   *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
+   * @return select Bytes representing the handover select as specified in
+   *         section 3.1.2 of NFC Connection Handover 1.2 Technical
+   *         Specification.
+   */
+  createNfcHandoverSelectMessage()
+      generates (SupplicantStatus status, vec<uint8_t> select);
+
+  /**
+   * Report the response of the NFC handover request.
+   *
+   * @param request Bytes representing the handover request as specified in
+   *        section 3.1.1 of NFC Connection Handover 1.2 Technical
+   *        Specification.
+   * @return status Status of the operation.
+   *         Possible status codes:
+   *         |SupplicantStatusCode.SUCCESS|,
+   *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
+   *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
+   */
+  reportNfcHandoverResponse(vec<uint8_t> request)
+      generates (SupplicantStatus status);
+
+  /**
+   * Report the initiation of the NFC handover select.
+   *
+   * @param select Bytes representing the handover select as specified in
+   *        section 3.1.2 of NFC Connection Handover 1.2 Technical
+   *        Specification.
+   * @return status Status of the operation.
+   *         Possible status codes:
+   *         |SupplicantStatusCode.SUCCESS|,
+   *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
+   *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
+   */
+  reportNfcHandoverInitiation(vec<uint8_t> select)
+      generates (SupplicantStatus status);
+
+  /**
+   * Persist the current configuration to disk.
+   *
+   * @return status Status of the operation.
+   *         Possible status codes:
+   *         |SupplicantStatusCode.SUCCESS|,
+   *         |SupplicantStatusCode.FAILURE_UNKNOWN|,
+   *         |SupplicantStatusCode.FAILURE_IFACE_INVALID|
+   */
+  saveConfig() generates (SupplicantStatus status);
 };

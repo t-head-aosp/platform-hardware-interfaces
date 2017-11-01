@@ -15,9 +15,10 @@
 //
 
 #define LOG_TAG "android.hardware.bluetooth@1.0-impl"
-#include <utils/Log.h>
-
 #include "bluetooth_hci.h"
+
+#include <log/log.h>
+
 #include "vendor_interface.h"
 
 namespace android {
@@ -30,35 +31,85 @@ static const uint8_t HCI_DATA_TYPE_COMMAND = 1;
 static const uint8_t HCI_DATA_TYPE_ACL = 2;
 static const uint8_t HCI_DATA_TYPE_SCO = 3;
 
-Return<Status> BluetoothHci::initialize(
+class BluetoothDeathRecipient : public hidl_death_recipient {
+ public:
+  BluetoothDeathRecipient(const sp<IBluetoothHci> hci) : mHci(hci) {}
+
+  virtual void serviceDied(
+      uint64_t /*cookie*/,
+      const wp<::android::hidl::base::V1_0::IBase>& /*who*/) {
+    ALOGE("BluetoothDeathRecipient::serviceDied - Bluetooth service died");
+    has_died_ = true;
+    mHci->close();
+  }
+  sp<IBluetoothHci> mHci;
+  bool getHasDied() const { return has_died_; }
+  void setHasDied(bool has_died) { has_died_ = has_died; }
+
+ private:
+  bool has_died_;
+};
+
+BluetoothHci::BluetoothHci()
+    : death_recipient_(new BluetoothDeathRecipient(this)) {}
+
+Return<void> BluetoothHci::initialize(
     const ::android::sp<IBluetoothHciCallbacks>& cb) {
-  ALOGW("BluetoothHci::initialize()");
-  event_cb_ = cb;
+  ALOGI("BluetoothHci::initialize()");
+  if (cb == nullptr) {
+    ALOGE("cb == nullptr! -> Unable to call initializationComplete(ERR)");
+    return Void();
+  }
+
+  death_recipient_->setHasDied(false);
+  cb->linkToDeath(death_recipient_, 0);
 
   bool rc = VendorInterface::Initialize(
-      [this](HciPacketType type, const hidl_vec<uint8_t>& packet) {
-        switch (type) {
-          case HCI_PACKET_TYPE_EVENT:
-            event_cb_->hciEventReceived(packet);
-            break;
-          case HCI_PACKET_TYPE_ACL_DATA:
-            event_cb_->aclDataReceived(packet);
-            break;
-          case HCI_PACKET_TYPE_SCO_DATA:
-            event_cb_->scoDataReceived(packet);
-            break;
-          default:
-            ALOGE("%s Unexpected event type %d", __func__, type);
-            break;
+      [cb](bool status) {
+        auto hidl_status = cb->initializationComplete(
+            status ? Status::SUCCESS : Status::INITIALIZATION_ERROR);
+        if (!hidl_status.isOk()) {
+          ALOGE("VendorInterface -> Unable to call initializationComplete()");
+        }
+      },
+      [cb](const hidl_vec<uint8_t>& packet) {
+        auto hidl_status = cb->hciEventReceived(packet);
+        if (!hidl_status.isOk()) {
+          ALOGE("VendorInterface -> Unable to call hciEventReceived()");
+        }
+      },
+      [cb](const hidl_vec<uint8_t>& packet) {
+        auto hidl_status = cb->aclDataReceived(packet);
+        if (!hidl_status.isOk()) {
+          ALOGE("VendorInterface -> Unable to call aclDataReceived()");
+        }
+      },
+      [cb](const hidl_vec<uint8_t>& packet) {
+        auto hidl_status = cb->scoDataReceived(packet);
+        if (!hidl_status.isOk()) {
+          ALOGE("VendorInterface -> Unable to call scoDataReceived()");
         }
       });
-  if (!rc) return Status::INITIALIZATION_ERROR;
+  if (!rc) {
+    auto hidl_status = cb->initializationComplete(Status::INITIALIZATION_ERROR);
+    if (!hidl_status.isOk()) {
+      ALOGE("VendorInterface -> Unable to call initializationComplete(ERR)");
+    }
+  }
 
-  return Status::SUCCESS;
+  unlink_cb_ = [cb](sp<BluetoothDeathRecipient>& death_recipient) {
+    if (death_recipient->getHasDied())
+      ALOGI("Skipping unlink call, service died.");
+    else
+      cb->unlinkToDeath(death_recipient);
+  };
+
+  return Void();
 }
 
 Return<void> BluetoothHci::close() {
-  ALOGW("BluetoothHci::close()");
+  ALOGI("BluetoothHci::close()");
+  unlink_cb_(death_recipient_);
   VendorInterface::Shutdown();
   return Void();
 }
@@ -80,8 +131,7 @@ Return<void> BluetoothHci::sendScoData(const hidl_vec<uint8_t>& data) {
 
 void BluetoothHci::sendDataToController(const uint8_t type,
                                         const hidl_vec<uint8_t>& data) {
-  VendorInterface::get()->Send(&type, 1);
-  VendorInterface::get()->Send(data.data(), data.size());
+  VendorInterface::get()->Send(type, data.data(), data.size());
 }
 
 IBluetoothHci* HIDL_FETCH_IBluetoothHci(const char* /* name */) {
