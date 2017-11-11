@@ -18,12 +18,17 @@
 
 #include "Hwc.h"
 
+#include <chrono>
 #include <type_traits>
 #include <log/log.h>
 
 #include "ComposerClient.h"
+#include "hardware/fb.h"
 #include "hardware/hwcomposer.h"
 #include "hwc2on1adapter/HWC2On1Adapter.h"
+#include "hwc2onfbadapter/HWC2OnFbAdapter.h"
+
+using namespace std::chrono_literals;
 
 namespace android {
 namespace hardware {
@@ -32,9 +37,31 @@ namespace composer {
 namespace V2_1 {
 namespace implementation {
 
-
 HwcHal::HwcHal(const hw_module_t* module)
-    : mDevice(nullptr), mDispatch(), mAdapter()
+    : mDevice(nullptr), mDispatch(), mMustValidateDisplay(true), mAdapter() {
+    uint32_t majorVersion;
+    if (module->id && strcmp(module->id, GRALLOC_HARDWARE_MODULE_ID) == 0) {
+        majorVersion = initWithFb(module);
+    } else {
+        majorVersion = initWithHwc(module);
+    }
+
+    initCapabilities();
+    if (majorVersion >= 2 &&
+        hasCapability(Capability::PRESENT_FENCE_IS_NOT_RELIABLE)) {
+        ALOGE("Present fence must be reliable from HWC2 on.");
+        abort();
+    }
+
+    initDispatch();
+}
+
+HwcHal::~HwcHal()
+{
+    hwc2_close(mDevice);
+}
+
+uint32_t HwcHal::initWithHwc(const hw_module_t* module)
 {
     // Determine what kind of module is available (HWC2 vs HWC1.X).
     hw_device_t* device = nullptr;
@@ -64,19 +91,22 @@ HwcHal::HwcHal(const hw_module_t* module)
         mDevice = reinterpret_cast<hwc2_device_t*>(device);
     }
 
-    initCapabilities();
-    if (majorVersion >= 2 &&
-        hasCapability(Capability::PRESENT_FENCE_IS_NOT_RELIABLE)) {
-        ALOGE("Present fence must be reliable from HWC2 on.");
+    return majorVersion;
+}
+
+uint32_t HwcHal::initWithFb(const hw_module_t* module)
+{
+    framebuffer_device_t* fb_device;
+    int error = framebuffer_open(module, &fb_device);
+    if (error != 0) {
+        ALOGE("Failed to open FB device (%s), aborting", strerror(-error));
         abort();
     }
 
-    initDispatch();
-}
+    mFbAdapter = std::make_unique<HWC2OnFbAdapter>(fb_device);
+    mDevice = mFbAdapter.get();
 
-HwcHal::~HwcHal()
-{
-    hwc2_close(mDevice);
+    return 0;
 }
 
 void HwcHal::initCapabilities()
@@ -218,7 +248,24 @@ Return<void> HwcHal::createClient(createClient_cb hidl_cb)
     sp<ComposerClient> client;
 
     {
-        std::lock_guard<std::mutex> lock(mClientMutex);
+        std::unique_lock<std::mutex> lock(mClientMutex);
+
+        if (mClient != nullptr) {
+            // In surface flinger we delete a composer client on one thread and
+            // then create a new client on another thread. Although surface
+            // flinger ensures the calls are made in that sequence (destroy and
+            // then create), sometimes the calls land in the composer service
+            // inverted (create and then destroy). Wait for a brief period to
+            // see if the existing client is destroyed.
+            ALOGI("HwcHal::createClient: Client already exists. Waiting for"
+                    " it to be destroyed.");
+            mClientDestroyedWait.wait_for(lock, 1s,
+                    [this] { return mClient == nullptr; });
+            std::string doneMsg = mClient == nullptr ?
+                    "Existing client was destroyed." :
+                    "Existing client was never destroyed!";
+            ALOGI("HwcHal::createClient: Done waiting. %s", doneMsg.c_str());
+        }
 
         // only one client is allowed
         if (mClient == nullptr) {
@@ -245,6 +292,7 @@ void HwcHal::removeClient()
 {
     std::lock_guard<std::mutex> lock(mClientMutex);
     mClient = nullptr;
+    mClientDestroyedWait.notify_all();
 }
 
 void HwcHal::hotplugHook(hwc2_callback_data_t callbackData,
@@ -262,6 +310,8 @@ void HwcHal::refreshHook(hwc2_callback_data_t callbackData,
         hwc2_display_t display)
 {
     auto hal = reinterpret_cast<HwcHal*>(callbackData);
+    hal->mMustValidateDisplay = true;
+
     auto client = hal->getClient();
     if (client != nullptr) {
         client->onRefresh(display);
@@ -281,6 +331,8 @@ void HwcHal::vsyncHook(hwc2_callback_data_t callbackData,
 void HwcHal::enableCallback(bool enable)
 {
     if (enable) {
+        mMustValidateDisplay = true;
+
         mDispatch.registerCallback(mDevice, HWC2_CALLBACK_HOTPLUG, this,
                 reinterpret_cast<hwc2_function_pointer_t>(hotplugHook));
         mDispatch.registerCallback(mDevice, HWC2_CALLBACK_REFRESH, this,
@@ -528,6 +580,8 @@ Error HwcHal::validateDisplay(Display display,
     uint32_t reqs_count = 0;
     int32_t err = mDispatch.validateDisplay(mDevice, display,
             &types_count, &reqs_count);
+    mMustValidateDisplay = false;
+
     if (err != HWC2_ERROR_NONE && err != HWC2_ERROR_HAS_CHANGES) {
         return static_cast<Error>(err);
     }
@@ -588,6 +642,10 @@ Error HwcHal::acceptDisplayChanges(Display display)
 Error HwcHal::presentDisplay(Display display, int32_t* outPresentFence,
         std::vector<Layer>* outLayers, std::vector<int32_t>* outReleaseFences)
 {
+    if (mMustValidateDisplay) {
+        return Error::NOT_VALIDATED;
+    }
+
     *outPresentFence = -1;
     int32_t err = mDispatch.presentDisplay(mDevice, display, outPresentFence);
     if (err != HWC2_ERROR_NONE) {
@@ -728,7 +786,11 @@ IComposer* HIDL_FETCH_IComposer(const char*)
     const hw_module_t* module = nullptr;
     int err = hw_get_module(HWC_HARDWARE_MODULE_ID, &module);
     if (err) {
-        ALOGE("failed to get hwcomposer module");
+        ALOGI("falling back to FB HAL");
+        err = hw_get_module(GRALLOC_HARDWARE_MODULE_ID, &module);
+    }
+    if (err) {
+        ALOGE("failed to get hwcomposer or fb module");
         return nullptr;
     }
 
