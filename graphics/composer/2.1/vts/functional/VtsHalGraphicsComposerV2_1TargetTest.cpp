@@ -118,7 +118,7 @@ class GraphicsComposerCallback : public IComposerCallback {
   // the set of all currently connected displays
   std::unordered_set<Display> mDisplays;
   // true only when vsync is enabled
-  bool mVsyncAllowed = true;
+  bool mVsyncAllowed = false;
 
   // track invalid callbacks
   int mInvalidHotplugCount = 0;
@@ -137,10 +137,6 @@ class GraphicsComposerHidlTest : public ::testing::VtsHalHidlTargetTestBase {
 
     // assume the first display is primary and is never removed
     mPrimaryDisplay = waitForFirstDisplay();
-
-    // explicitly disable vsync
-    mComposerClient->setVsyncEnabled(mPrimaryDisplay, false);
-    mComposerCallback->setVsyncAllowed(false);
   }
 
   void TearDown() override {

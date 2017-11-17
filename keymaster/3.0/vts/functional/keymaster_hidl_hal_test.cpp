@@ -1730,7 +1730,7 @@ TEST_F(SigningOperationsTest, EcdsaNoDigestHugeData) {
                                              .Authorization(TAG_NO_AUTH_REQUIRED)
                                              .EcdsaSigningKey(224)
                                              .Digest(Digest::NONE)));
-    string message(2 * 1024, 'a');
+    string message(64 * 1024, 'a');
     SignMessage(message, AuthorizationSetBuilder().Digest(Digest::NONE));
 }
 
@@ -2564,7 +2564,7 @@ TEST_F(EncryptionOperationsTest, RsaNoPaddingTooLong) {
 }
 
 /*
- * EncryptionOperationsTest.RsaNoPaddingTooLarge
+ * EncryptionOperationsTest.RsaNoPaddingTooLong
  *
  * Verifies that raw RSA encryption of too-large (numerically) messages fails in the expected way.
  */
@@ -3864,7 +3864,7 @@ TEST_F(AddEntropyTest, AddEmptyEntropy) {
  * Verifies that the addRngEntropy method doesn't blow up when given a largish amount of data.
  */
 TEST_F(AddEntropyTest, AddLargeEntropy) {
-    EXPECT_EQ(ErrorCode::OK, keymaster().addRngEntropy(HidlBuf(string(2 * 1024, 'a'))));
+    EXPECT_EQ(ErrorCode::OK, keymaster().addRngEntropy(HidlBuf(string(16 * 1024, 'a'))));
 }
 
 typedef KeymasterHidlTest AttestationTest;

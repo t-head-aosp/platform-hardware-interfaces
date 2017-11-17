@@ -23,9 +23,12 @@
 class SupplicantHidlEnvironment : public ::testing::Environment {
    public:
     virtual void SetUp() override {
+        stopWifiFramework();
         stopSupplicant();
     }
     virtual void TearDown() override {
+        startWifiFramework();
+        // Framework will start wpa_supplicant.
     }
 };
 
