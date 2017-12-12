@@ -30,6 +30,8 @@ LOCAL_SRC_FILES := \
     StreamIn.cpp \
     StreamOut.cpp \
 
+LOCAL_CFLAGS := -Wall -Werror
+
 LOCAL_SHARED_LIBRARIES := \
     libbase \
     libcutils \
@@ -65,6 +67,8 @@ LOCAL_PROPRIETARY_MODULE := true
 LOCAL_SRC_FILES := \
     service.cpp
 
+LOCAL_CFLAGS := -Wall -Werror
+
 LOCAL_SHARED_LIBRARIES := \
     libhidlbase \
     libhidltransport \
@@ -82,10 +86,6 @@ ifeq ($(strip $(AUDIOSERVER_MULTILIB)),)
 LOCAL_MULTILIB := 32
 else
 LOCAL_MULTILIB := $(AUDIOSERVER_MULTILIB)
-endif
-
-ifeq ($(TARGET_USES_BCRADIO_FUTURE_FEATURES),true)
-LOCAL_CFLAGS += -DTARGET_USES_BCRADIO_FUTURE_FEATURES
 endif
 
 include $(BUILD_EXECUTABLE)

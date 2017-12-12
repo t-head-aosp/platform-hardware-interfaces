@@ -1774,7 +1774,7 @@ TEST_F(SigningOperationsTest, EcdsaNoDigestHugeData) {
                                              .Authorization(TAG_NO_AUTH_REQUIRED)
                                              .EcdsaSigningKey(224)
                                              .Digest(Digest::NONE)));
-    string message(64 * 1024, 'a');
+    string message(2 * 1024, 'a');
     SignMessage(message, AuthorizationSetBuilder().Digest(Digest::NONE));
 }
 
@@ -2607,7 +2607,7 @@ TEST_F(EncryptionOperationsTest, RsaNoPaddingTooLong) {
 }
 
 /*
- * EncryptionOperationsTest.RsaNoPaddingTooLong
+ * EncryptionOperationsTest.RsaNoPaddingTooLarge
  *
  * Verifies that raw RSA encryption of too-large (numerically) messages fails in the expected way.
  */
@@ -2762,7 +2762,8 @@ TEST_F(EncryptionOperationsTest, RsaOaepTooLarge) {
               Begin(KeyPurpose::ENCRYPT,
                     AuthorizationSetBuilder().Padding(PaddingMode::RSA_OAEP).Digest(Digest::SHA1)));
     string result;
-    EXPECT_EQ(ErrorCode::INVALID_INPUT_LENGTH, Finish(message, &result));
+    auto error = Finish(message, &result);
+    EXPECT_TRUE(error == ErrorCode::INVALID_INPUT_LENGTH || error == ErrorCode::INVALID_ARGUMENT);
     EXPECT_EQ(0U, result.size());
 }
 
@@ -2820,7 +2821,8 @@ TEST_F(EncryptionOperationsTest, RsaPkcs1TooLarge) {
     auto params = AuthorizationSetBuilder().Padding(PaddingMode::RSA_PKCS1_1_5_ENCRYPT);
     EXPECT_EQ(ErrorCode::OK, Begin(KeyPurpose::ENCRYPT, params));
     string result;
-    EXPECT_EQ(ErrorCode::INVALID_INPUT_LENGTH, Finish(message, &result));
+    auto error = Finish(message, &result);
+    EXPECT_TRUE(error == ErrorCode::INVALID_INPUT_LENGTH || error == ErrorCode::INVALID_ARGUMENT);
     EXPECT_EQ(0U, result.size());
 }
 
@@ -3907,7 +3909,7 @@ TEST_F(AddEntropyTest, AddEmptyEntropy) {
  * Verifies that the addRngEntropy method doesn't blow up when given a largish amount of data.
  */
 TEST_F(AddEntropyTest, AddLargeEntropy) {
-    EXPECT_EQ(ErrorCode::OK, keymaster().addRngEntropy(HidlBuf(string(16 * 1024, 'a'))));
+    EXPECT_EQ(ErrorCode::OK, keymaster().addRngEntropy(HidlBuf(string(2 * 1024, 'a'))));
 }
 
 typedef KeymasterHidlTest AttestationTest;
