@@ -129,7 +129,7 @@ class DrmHalVendorFactoryTest : public testing::TestWithParam<std::string> {
         // Do the same for the crypto factory
         cryptoFactory = VtsTestBase::getService<ICryptoFactory>(name);
         if (cryptoFactory == nullptr) {
-            cryptoFactory = VtsTestBase::getService<ICryptoFactory>();
+            VtsTestBase::getService<ICryptoFactory>();
         }
         ASSERT_NE(cryptoFactory, nullptr);
 
