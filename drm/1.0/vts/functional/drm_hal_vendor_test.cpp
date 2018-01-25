@@ -129,7 +129,7 @@ class DrmHalVendorFactoryTest : public testing::TestWithParam<std::string> {
         // Do the same for the crypto factory
         cryptoFactory = VtsTestBase::getService<ICryptoFactory>(name);
         if (cryptoFactory == nullptr) {
-            VtsTestBase::getService<ICryptoFactory>();
+            cryptoFactory = VtsTestBase::getService<ICryptoFactory>();
         }
         ASSERT_NE(cryptoFactory, nullptr);
 
@@ -1598,9 +1598,8 @@ int main(int argc, char** argv) {
 #endif
     gVendorModules = new drm_vts::VendorModules(kModulePath);
     if (gVendorModules->getPathList().size() == 0) {
-        std::cerr << "No vendor modules found in " << kModulePath <<
-                ", exiting" << std::endl;
-        exit(-1);
+        std::cerr << "WARNING: No vendor modules found in " << kModulePath <<
+                ", all vendor tests will be skipped" << std::endl;
     }
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

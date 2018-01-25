@@ -19,6 +19,11 @@
 void RadioHidlTest::SetUp() {
     radio =
         ::testing::VtsHalHidlTargetTestBase::getService<IRadio>(hidl_string(RADIO_SERVICE_NAME));
+    if (radio == NULL) {
+        sleep(60);
+        radio = ::testing::VtsHalHidlTargetTestBase::getService<IRadio>(
+            hidl_string(RADIO_SERVICE_NAME));
+    }
     ASSERT_NE(radio, nullptr);
 
     radioRsp = new RadioResponse(*this);
@@ -35,6 +40,10 @@ void RadioHidlTest::SetUp() {
     EXPECT_EQ(RadioResponseType::SOLICITED, radioRsp->rspInfo.type);
     EXPECT_EQ(serial, radioRsp->rspInfo.serial);
     EXPECT_EQ(RadioError::NONE, radioRsp->rspInfo.error);
+
+    /* Vts Testing with Sim Absent only. This needs to be removed later in P when sim present
+     * scenarios will be tested. */
+    EXPECT_EQ(CardState::ABSENT, cardStatus.cardState);
 }
 
 void RadioHidlTest::TearDown() {}
