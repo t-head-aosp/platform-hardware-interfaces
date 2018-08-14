@@ -20,6 +20,7 @@
 #include <iostream>
 
 #include <openssl/evp.h>
+#include <openssl/mem.h>
 #include <openssl/x509.h>
 
 #include <android/hardware/keymaster/3.0/IKeymasterDevice.h>
@@ -322,11 +323,11 @@ bool verify_chain(const hidl_vec<hidl_vec<uint8_t>>& chain) {
             char* cert_sub = X509_NAME_oneline(X509_get_subject_name(key_cert.get()), nullptr, 0);
             EXPECT_STREQ("/CN=Android Keystore Key", cert_sub)
                 << "Cert " << i << " has wrong subject.  (Possibly b/38394614)";
-            free(cert_sub);
+            OPENSSL_free(cert_sub);
         }
 
-        free(cert_issuer);
-        free(signer_subj);
+        OPENSSL_free(cert_issuer);
+        OPENSSL_free(signer_subj);
 
         if (dump_Attestations) std::cout << bin2hex(chain[i]) << std::endl;
     }
@@ -908,13 +909,20 @@ class KeymasterHidlTest : public ::testing::VtsHalHidlTargetTestBase {
         }
     }
 
-    void CheckOrigin() {
+    void CheckOrigin(bool asymmetric = false) {
         SCOPED_TRACE("CheckOrigin");
         if (is_secure_ && supports_symmetric_) {
             EXPECT_TRUE(
                 contains(key_characteristics_.teeEnforced, TAG_ORIGIN, KeyOrigin::IMPORTED));
         } else if (is_secure_) {
-            EXPECT_TRUE(contains(key_characteristics_.teeEnforced, TAG_ORIGIN, KeyOrigin::UNKNOWN));
+            // wrapped KM0
+            if (asymmetric) {
+                EXPECT_TRUE(
+                    contains(key_characteristics_.teeEnforced, TAG_ORIGIN, KeyOrigin::UNKNOWN));
+            } else {
+                EXPECT_TRUE(contains(key_characteristics_.softwareEnforced, TAG_ORIGIN,
+                                     KeyOrigin::IMPORTED));
+            }
         } else {
             EXPECT_TRUE(
                 contains(key_characteristics_.softwareEnforced, TAG_ORIGIN, KeyOrigin::IMPORTED));
@@ -1003,8 +1011,8 @@ bool verify_attestation_record(const string& challenge, const string& app_id,
                                    HidlBuf(app_id));
 
     if (!KeymasterHidlTest::IsSecure()) {
-        // SW is KM2
-        EXPECT_EQ(att_keymaster_version, 2U);
+        // SW is KM3
+        EXPECT_EQ(att_keymaster_version, 3U);
     }
 
     if (KeymasterHidlTest::SupportsSymmetric()) {
@@ -1069,13 +1077,17 @@ TEST_F(KeymasterVersionTest, SensibleFeatures) {
 
 class NewKeyGenerationTest : public KeymasterHidlTest {
   protected:
-    void CheckBaseParams(const KeyCharacteristics& keyCharacteristics) {
+    void CheckBaseParams(const KeyCharacteristics& keyCharacteristics, bool asymmetric = false) {
         // TODO(swillden): Distinguish which params should be in which auth list.
 
         AuthorizationSet auths(keyCharacteristics.teeEnforced);
         auths.push_back(AuthorizationSet(keyCharacteristics.softwareEnforced));
 
-        EXPECT_TRUE(auths.Contains(TAG_ORIGIN, KeyOrigin::GENERATED));
+        if (!SupportsSymmetric() && asymmetric) {
+            EXPECT_TRUE(auths.Contains(TAG_ORIGIN, KeyOrigin::UNKNOWN));
+        } else {
+            EXPECT_TRUE(auths.Contains(TAG_ORIGIN, KeyOrigin::GENERATED));
+        }
 
         EXPECT_TRUE(auths.Contains(TAG_PURPOSE, KeyPurpose::SIGN));
         EXPECT_TRUE(auths.Contains(TAG_PURPOSE, KeyPurpose::VERIFY));
@@ -1124,7 +1136,7 @@ TEST_F(NewKeyGenerationTest, Rsa) {
                                              &key_blob, &key_characteristics));
 
         ASSERT_GT(key_blob.size(), 0U);
-        CheckBaseParams(key_characteristics);
+        CheckBaseParams(key_characteristics, true /* asymmetric */);
 
         AuthorizationSet crypto_params;
         if (IsSecure()) {
@@ -1170,7 +1182,7 @@ TEST_F(NewKeyGenerationTest, Ecdsa) {
                                                  .Authorizations(UserAuths()),
                                              &key_blob, &key_characteristics));
         ASSERT_GT(key_blob.size(), 0U);
-        CheckBaseParams(key_characteristics);
+        CheckBaseParams(key_characteristics, true /* asymmetric */);
 
         AuthorizationSet crypto_params;
         if (IsSecure()) {
@@ -1575,7 +1587,9 @@ TEST_F(SigningOperationsTest, RsaNoPaddingTooLong) {
                                           .Digest(Digest::NONE)
                                           .Padding(PaddingMode::RSA_PKCS1_1_5_SIGN)));
     string result;
-    EXPECT_EQ(ErrorCode::INVALID_INPUT_LENGTH, Finish(message, &result));
+    ErrorCode finish_error_code = Finish(message, &result);
+    EXPECT_TRUE(finish_error_code == ErrorCode::INVALID_INPUT_LENGTH ||
+                finish_error_code == ErrorCode::INVALID_ARGUMENT);
 
     // Very large message that should exceed the transfer buffer size of any reasonable TEE.
     message = string(128 * 1024, 'a');
@@ -1583,7 +1597,9 @@ TEST_F(SigningOperationsTest, RsaNoPaddingTooLong) {
               Begin(KeyPurpose::SIGN, AuthorizationSetBuilder()
                                           .Digest(Digest::NONE)
                                           .Padding(PaddingMode::RSA_PKCS1_1_5_SIGN)));
-    EXPECT_EQ(ErrorCode::INVALID_INPUT_LENGTH, Finish(message, &result));
+    finish_error_code = Finish(message, &result);
+    EXPECT_TRUE(finish_error_code == ErrorCode::INVALID_INPUT_LENGTH ||
+                finish_error_code == ErrorCode::INVALID_ARGUMENT);
 }
 
 /*
@@ -2289,8 +2305,7 @@ TEST_F(ExportKeyTest, RsaUnsupportedKeyFormat) {
  * Verifies that attempting to export RSA keys from corrupted key blobs fails.  This is essentially
  * a poor-man's key blob fuzzer.
  */
-// Disabled due to b/33385206
-TEST_F(ExportKeyTest, DISABLED_RsaCorruptedKeyBlob) {
+TEST_F(ExportKeyTest, RsaCorruptedKeyBlob) {
     ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
                                              .Authorization(TAG_NO_AUTH_REQUIRED)
                                              .RsaSigningKey(1024, 3)
@@ -2313,8 +2328,7 @@ TEST_F(ExportKeyTest, DISABLED_RsaCorruptedKeyBlob) {
  * Verifies that attempting to export ECDSA keys from corrupted key blobs fails.  This is
  * essentially a poor-man's key blob fuzzer.
  */
-// Disabled due to b/33385206
-TEST_F(ExportKeyTest, DISABLED_EcCorruptedKeyBlob) {
+TEST_F(ExportKeyTest, EcCorruptedKeyBlob) {
     ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
                                              .Authorization(TAG_NO_AUTH_REQUIRED)
                                              .EcdsaSigningKey(EcCurve::P_256)
@@ -2367,7 +2381,7 @@ TEST_F(ImportKeyTest, RsaSuccess) {
     CheckKm0CryptoParam(TAG_RSA_PUBLIC_EXPONENT, 65537U);
     CheckKm1CryptoParam(TAG_DIGEST, Digest::SHA_2_256);
     CheckKm1CryptoParam(TAG_PADDING, PaddingMode::RSA_PSS);
-    CheckOrigin();
+    CheckOrigin(true /* asymmetric */);
 
     string message(1024 / 8, 'a');
     auto params = AuthorizationSetBuilder().Digest(Digest::SHA_2_256).Padding(PaddingMode::RSA_PSS);
@@ -2423,7 +2437,7 @@ TEST_F(ImportKeyTest, EcdsaSuccess) {
     CheckKm1CryptoParam(TAG_DIGEST, Digest::SHA_2_256);
     CheckKm2CryptoParam(TAG_EC_CURVE, EcCurve::P_256);
 
-    CheckOrigin();
+    CheckOrigin(true /* asymmetric */);
 
     string message(32, 'a');
     auto params = AuthorizationSetBuilder().Digest(Digest::SHA_2_256);
@@ -2449,7 +2463,7 @@ TEST_F(ImportKeyTest, Ecdsa521Success) {
     CheckKm1CryptoParam(TAG_DIGEST, Digest::SHA_2_256);
     CheckKm2CryptoParam(TAG_EC_CURVE, EcCurve::P_521);
 
-    CheckOrigin();
+    CheckOrigin(true /* asymmetric */);
 
     string message(32, 'a');
     auto params = AuthorizationSetBuilder().Digest(Digest::SHA_2_256);

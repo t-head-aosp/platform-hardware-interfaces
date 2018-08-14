@@ -60,13 +60,13 @@ include $(BUILD_FRAMEWORK_COMPATIBILITY_MATRIX)
 
 include $(CLEAR_VARS)
 include $(LOCAL_PATH)/clear_vars.mk
-LOCAL_MODULE := framework_compatibility_matrix.current.xml
-LOCAL_MODULE_STEM := compatibility_matrix.current.xml
+LOCAL_MODULE := framework_compatibility_matrix.3.xml
+LOCAL_MODULE_STEM := compatibility_matrix.3.xml
 LOCAL_SRC_FILES := $(LOCAL_MODULE_STEM)
 LOCAL_KERNEL_CONFIG_DATA_PATHS := \
-    4.4.0:$(my_kernel_config_data)/android-4.4 \
-    4.9.0:$(my_kernel_config_data)/android-4.9 \
-    4.14.0:$(my_kernel_config_data)/android-4.14 \
+    4.4.107:$(my_kernel_config_data)/p/android-4.4 \
+    4.9.84:$(my_kernel_config_data)/p/android-4.9 \
+    4.14.42:$(my_kernel_config_data)/p/android-4.14 \
 
 include $(BUILD_FRAMEWORK_COMPATIBILITY_MATRIX)
 
@@ -119,7 +119,7 @@ my_system_matrix_deps := \
     framework_compatibility_matrix.legacy.xml \
     framework_compatibility_matrix.1.xml \
     framework_compatibility_matrix.2.xml \
-    framework_compatibility_matrix.current.xml \
+    framework_compatibility_matrix.3.xml \
     framework_compatibility_matrix.device.xml
 
 # Phony target that installs all framework compatibility matrix files
@@ -128,13 +128,14 @@ LOCAL_MODULE := framework_compatibility_matrix.xml
 LOCAL_REQUIRED_MODULES := $(my_system_matrix_deps)
 include $(BUILD_PHONY_PACKAGE)
 
-# Final Framework Compatibility Matrix
+# Final Framework Compatibility Matrix for OTA
 include $(CLEAR_VARS)
 include $(LOCAL_PATH)/clear_vars.mk
 LOCAL_MODULE := verified_assembled_system_matrix.xml
 LOCAL_MODULE_PATH := $(PRODUCT_OUT)
 LOCAL_REQUIRED_MODULES := $(my_system_matrix_deps)
 LOCAL_GENERATED_SOURCES := $(call module-installed-files,$(LOCAL_REQUIRED_MODULES))
+LOCAL_ADD_VBMETA_VERSION_OVERRIDE := true
 
 ifdef BUILT_VENDOR_MANIFEST
 LOCAL_GEN_FILE_DEPENDENCIES += $(BUILT_VENDOR_MANIFEST)
