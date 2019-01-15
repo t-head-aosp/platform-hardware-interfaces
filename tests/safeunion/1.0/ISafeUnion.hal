@@ -18,6 +18,8 @@ package android.hardware.tests.safeunion@1.0;
 
 import IOtherInterface;
 
+import android.hidl.safe_union@1.0::Monostate;
+
 interface ISafeUnion {
 
     enum BitField : uint8_t {
@@ -33,14 +35,15 @@ interface ISafeUnion {
         string j3;
     };
 
-    safe_union EmptySafeUnion {
-    };
-
     safe_union SmallSafeUnion {
+        Monostate noinit;
+
         uint8_t a;
     };
 
     safe_union LargeSafeUnion {
+        Monostate noinit;
+
         int8_t a;
         uint16_t b;
         int32_t c;
@@ -60,9 +63,14 @@ interface ISafeUnion {
         } k;
 
         SmallSafeUnion l;
+
+        BitField m;
+        bitfield<BitField> n;
     };
 
     safe_union InterfaceTypeSafeUnion {
+        Monostate noinit;
+
         uint32_t a;
         int8_t[7] b;
         IOtherInterface c;
@@ -73,6 +81,8 @@ interface ISafeUnion {
     };
 
     safe_union HandleTypeSafeUnion {
+        Monostate noinit;
+
         handle a;
         handle[5] b;
         vec<handle> c;
@@ -91,6 +101,8 @@ interface ISafeUnion {
     setJ(LargeSafeUnion myUnion, J j) generates (LargeSafeUnion myUnion);
     setK(LargeSafeUnion myUnion, LargeSafeUnion.K k) generates (LargeSafeUnion myUnion);
     setL(LargeSafeUnion myUnion, SmallSafeUnion l) generates (LargeSafeUnion myUnion);
+    setM(LargeSafeUnion myUnion, BitField m) generates (LargeSafeUnion myUnion);
+    setN(LargeSafeUnion myUnion, bitfield<BitField> m) generates (LargeSafeUnion myUnion);
 
     newInterfaceTypeSafeUnion() generates (InterfaceTypeSafeUnion myUnion);
     setInterfaceA(InterfaceTypeSafeUnion myUnion, uint32_t a) generates (InterfaceTypeSafeUnion myUnion);
