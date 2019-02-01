@@ -128,10 +128,10 @@ static uint32_t addOperand(Model* model, OperandLifeTime lifetime) {
 ///////////////////////// VALIDATE MODEL OPERAND TYPE /////////////////////////
 
 static const uint32_t invalidOperandTypes[] = {
-    static_cast<uint32_t>(OperandTypeRange::OPERAND_FUNDAMENTAL_MIN) - 1,
-    static_cast<uint32_t>(OperandTypeRange::OPERAND_FUNDAMENTAL_MAX) + 1,
-    static_cast<uint32_t>(OperandTypeRange::OPERAND_OEM_MIN) - 1,
-    static_cast<uint32_t>(OperandTypeRange::OPERAND_OEM_MAX) + 1,
+        static_cast<uint32_t>(OperandTypeRange::FUNDAMENTAL_MIN) - 1,
+        static_cast<uint32_t>(OperandTypeRange::FUNDAMENTAL_MAX) + 1,
+        static_cast<uint32_t>(OperandTypeRange::OEM_MIN) - 1,
+        static_cast<uint32_t>(OperandTypeRange::OEM_MAX) + 1,
 };
 
 static void mutateOperandTypeTest(const sp<IDevice>& device, const Model& model) {
@@ -172,6 +172,9 @@ static uint32_t getInvalidRank(OperandType type) {
 static void mutateOperandRankTest(const sp<IDevice>& device, const Model& model) {
     for (size_t operand = 0; operand < model.operands.size(); ++operand) {
         const uint32_t invalidRank = getInvalidRank(model.operands[operand].type);
+        if (invalidRank == 0) {
+            continue;
+        }
         const std::string message = "mutateOperandRankTest: operand " + std::to_string(operand) +
                                     " has rank of " + std::to_string(invalidRank);
         validate(device, message, model, [operand, invalidRank](Model* model) {
@@ -327,6 +330,9 @@ static bool mutateOperationOperandTypeSkip(size_t operand, OperandType type, con
         // - CAST's argument can be any of TENSOR_(FLOAT16|FLOAT32|INT32|QUANT8_ASYMM).
         // - RANDOM_MULTINOMIAL's argument can be either TENSOR_FLOAT16 or TENSOR_FLOAT32.
         // - CONV_2D filter type (arg 1) can be QUANT8_ASYMM or QUANT8_SYMM_PER_CHANNEL
+        // - DEPTHWISE_CONV_2D filter type (arg 1) can be QUANT8_ASYMM or QUANT8_SYMM_PER_CHANNEL
+        // - GROUPED_CONV_2D filter type (arg 1) can be QUANT8_ASYMM or QUANT8_SYMM_PER_CHANNEL
+        // - TRANSPOSE_CONV_2D filter type (arg 1) can be QUANT8_ASYMM or QUANT8_SYMM_PER_CHANNEL
         switch (operation.type) {
             case OperationType::LSH_PROJECTION: {
                 if (operand == operation.inputs[1]) {
@@ -346,6 +352,9 @@ static bool mutateOperationOperandTypeSkip(size_t operand, OperandType type, con
                     return true;
                 }
             } break;
+            case OperationType::TRANSPOSE_CONV_2D:
+            case OperationType::GROUPED_CONV_2D:
+            case OperationType::DEPTHWISE_CONV_2D:
             case OperationType::CONV_2D: {
                 if (operand == 1 && (type == OperandType::TENSOR_QUANT8_ASYMM ||
                                      type == OperandType::TENSOR_QUANT8_SYMM_PER_CHANNEL)) {
@@ -378,10 +387,10 @@ static void mutateOperationOperandTypeTest(const sp<IDevice>& device, const Mode
 ///////////////////////// VALIDATE MODEL OPERATION TYPE /////////////////////////
 
 static const uint32_t invalidOperationTypes[] = {
-    static_cast<uint32_t>(OperationTypeRange::OPERATION_FUNDAMENTAL_MIN) - 1,
-    static_cast<uint32_t>(OperationTypeRange::OPERATION_FUNDAMENTAL_MAX) + 1,
-    static_cast<uint32_t>(OperationTypeRange::OPERATION_OEM_MIN) - 1,
-    static_cast<uint32_t>(OperationTypeRange::OPERATION_OEM_MAX) + 1,
+        static_cast<uint32_t>(OperationTypeRange::FUNDAMENTAL_MIN) - 1,
+        static_cast<uint32_t>(OperationTypeRange::FUNDAMENTAL_MAX) + 1,
+        static_cast<uint32_t>(OperationTypeRange::OEM_MIN) - 1,
+        static_cast<uint32_t>(OperationTypeRange::OEM_MAX) + 1,
 };
 
 static void mutateOperationTypeTest(const sp<IDevice>& device, const Model& model) {
