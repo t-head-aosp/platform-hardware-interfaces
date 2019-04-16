@@ -49,7 +49,17 @@ NeuralnetworksHidlTest::~NeuralnetworksHidlTest() {}
 void NeuralnetworksHidlTest::SetUp() {
     ::testing::VtsHalHidlTargetTestBase::SetUp();
     device = ::testing::VtsHalHidlTargetTestBase::getService<IDevice>(
-        NeuralnetworksHidlEnvironment::getInstance());
+            NeuralnetworksHidlEnvironment::getInstance());
+
+#ifdef PRESUBMIT_NOT_VTS
+    const std::string name =
+            NeuralnetworksHidlEnvironment::getInstance()->getServiceName<IDevice>();
+    const std::string sampleDriver = "sample-";
+    if (device == nullptr && name.substr(0, sampleDriver.size()) == sampleDriver) {
+        GTEST_SKIP();
+    }
+#endif  // PRESUBMIT_NOT_VTS
+
     ASSERT_NE(nullptr, device.get());
 }
 
@@ -66,6 +76,12 @@ sp<IPreparedModel> getPreparedModel_1_2(
 
 }  // namespace functional
 }  // namespace vts
+}  // namespace V1_2
+}  // namespace neuralnetworks
+}  // namespace hardware
+}  // namespace android
+
+namespace android::hardware::neuralnetworks::V1_0 {
 
 ::std::ostream& operator<<(::std::ostream& os, ErrorStatus errorStatus) {
     return os << toString(errorStatus);
@@ -75,10 +91,7 @@ sp<IPreparedModel> getPreparedModel_1_2(
     return os << toString(deviceStatus);
 }
 
-}  // namespace V1_2
-}  // namespace neuralnetworks
-}  // namespace hardware
-}  // namespace android
+}  // namespace android::hardware::neuralnetworks::V1_0
 
 using android::hardware::neuralnetworks::V1_2::vts::functional::NeuralnetworksHidlEnvironment;
 
