@@ -14,13 +14,20 @@
  * limitations under the License.
  */
 
-#include <VtsHalHidlTargetTestBase.h>
-#include <android-base/logging.h>
+package android.hardware.tv.tuner@1.0;
 
-#include "hostapd_hidl_test_utils.h"
-#include "hostapd_hidl_test_utils_1_1.h"
+interface IDvrCallback {
+    /**
+     * Notify the client a new status of the demux's record.
+     *
+     * @param status a new status of the demux's record.
+     */
+    oneway onRecordStatus(RecordStatus status);
 
-using ::android::sp;
-using ::android::hardware::wifi::hostapd::V1_1::IHostapd;
-
-sp<IHostapd> getHostapd_1_1() { return IHostapd::castFrom(getHostapd()); }
+    /**
+     * Notify the client a new status of the demux's playback.
+     *
+     * @param status a new status of the demux's playback.
+     */
+    oneway onPlaybackStatus(PlaybackStatus status);
+};
