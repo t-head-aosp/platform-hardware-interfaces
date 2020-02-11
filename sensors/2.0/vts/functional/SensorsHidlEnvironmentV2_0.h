@@ -32,25 +32,22 @@ using ::android::sp;
 using ::android::hardware::MessageQueue;
 
 class SensorsHidlTest;
+
+class SensorsHalDeathRecipient : public ::android::hardware::hidl_death_recipient {
+    virtual void serviceDied(
+            uint64_t cookie,
+            const ::android::wp<::android::hidl::base::V1_0::IBase>& service) override;
+};
+
 class SensorsHidlEnvironmentV2_0 : public SensorsHidlEnvironmentBase {
    public:
     using Event = ::android::hardware::sensors::V1_0::Event;
-    // get the test environment singleton
-    static SensorsHidlEnvironmentV2_0* Instance() {
-        static SensorsHidlEnvironmentV2_0* instance = new SensorsHidlEnvironmentV2_0();
-        return instance;
-    }
-
-    virtual void registerTestServices() override {
-        registerTestService<android::hardware::sensors::V2_0::ISensors>();
-    }
-
     virtual void HidlTearDown() override;
 
    protected:
     friend SensorsHidlTest;
-
-    SensorsHidlEnvironmentV2_0() : mEventQueueFlag(nullptr) {}
+    SensorsHidlEnvironmentV2_0(const std::string& service_name)
+        : SensorsHidlEnvironmentBase(service_name), mEventQueueFlag(nullptr) {}
 
     /**
      * Resets the HAL with new FMQs and a new Event Flag
@@ -82,6 +79,11 @@ class SensorsHidlEnvironmentV2_0 : public SensorsHidlEnvironmentBase {
      * Pointer to the Sensors HAL Interface that allows the test to call HAL functions.
      */
     sp<android::hardware::sensors::V2_0::ISensors> mSensors;
+
+    /**
+     * Monitors the HAL for crashes, triggering test failure if seen
+     */
+    sp<SensorsHalDeathRecipient> mDeathRecipient = new SensorsHalDeathRecipient();
 
     /**
      * Type used to simplify the creation of the Event FMQ

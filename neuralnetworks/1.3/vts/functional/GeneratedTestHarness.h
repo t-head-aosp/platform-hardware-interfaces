@@ -17,8 +17,8 @@
 #ifndef ANDROID_HARDWARE_NEURALNETWORKS_V1_3_GENERATED_TEST_HARNESS_H
 #define ANDROID_HARDWARE_NEURALNETWORKS_V1_3_GENERATED_TEST_HARNESS_H
 
-#include <android/hardware/neuralnetworks/1.2/IPreparedModel.h>
 #include <android/hardware/neuralnetworks/1.3/IDevice.h>
+#include <android/hardware/neuralnetworks/1.3/IPreparedModel.h>
 #include <android/hardware/neuralnetworks/1.3/types.h>
 #include <functional>
 #include <vector>
@@ -36,6 +36,7 @@ class GeneratedTestBase : public testing::TestWithParam<GeneratedTestParam> {
     void SetUp() override;
     const sp<IDevice> kDevice = getData(std::get<NamedDevice>(GetParam()));
     const test_helper::TestModel& kTestModel = *getData(std::get<NamedModel>(GetParam()));
+    std::pair<bool, bool> mSupportsDeadlines;
 };
 
 using FilterFn = std::function<bool(const test_helper::TestModel&)>;
@@ -55,11 +56,25 @@ class ValidationTest : public GeneratedTestBase {};
 
 Model createModel(const test_helper::TestModel& testModel);
 
-void PrepareModel(const sp<IDevice>& device, const Model& model,
-                  sp<V1_2::IPreparedModel>* preparedModel);
+void PrepareModel(const sp<IDevice>& device, const Model& model, sp<IPreparedModel>* preparedModel);
 
-void EvaluatePreparedModel(const sp<V1_2::IPreparedModel>& preparedModel,
-                           const test_helper::TestModel& testModel, bool testDynamicOutputShape);
+enum class TestKind {
+    // Runs a test model and compares the results to a golden data
+    GENERAL,
+    // Same as GENERAL but sets dimensions for the output tensors to zeros
+    DYNAMIC_SHAPE,
+    // Same as GENERAL but use device memories for inputs and outputs
+    MEMORY_DOMAIN,
+    // Same as GENERAL but use executeFenced for exeuction
+    FENCED_COMPUTE,
+    // Tests if quantized model with TENSOR_QUANT8_ASYMM produces the same result
+    // (OK/SKIPPED/FAILED) as the model with all such tensors converted to
+    // TENSOR_QUANT8_ASYMM_SIGNED.
+    QUANTIZATION_COUPLING
+};
+
+void EvaluatePreparedModel(const sp<IDevice>& device, const sp<IPreparedModel>& preparedModel,
+                           const test_helper::TestModel& testModel, TestKind testKind);
 
 }  // namespace android::hardware::neuralnetworks::V1_3::vts::functional
 
