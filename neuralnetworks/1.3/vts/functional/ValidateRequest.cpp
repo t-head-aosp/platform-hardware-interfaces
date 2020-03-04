@@ -61,7 +61,7 @@ static void validate(const sp<IPreparedModel>& preparedModel, const std::string&
 
     OptionalTimePoint deadline;
     if (testDeadline) {
-        deadline.nanoseconds(std::numeric_limits<uint64_t>::max());
+        deadline.nanosecondsSinceEpoch(std::numeric_limits<uint64_t>::max());
     }
 
     // asynchronous
@@ -70,7 +70,7 @@ static void validate(const sp<IPreparedModel>& preparedModel, const std::string&
 
         sp<ExecutionCallback> executionCallback = new ExecutionCallback();
         Return<ErrorStatus> executeLaunchStatus =
-                preparedModel->execute_1_3(request, measure, deadline, executionCallback);
+                preparedModel->execute_1_3(request, measure, deadline, {}, executionCallback);
         ASSERT_TRUE(executeLaunchStatus.isOk());
         ASSERT_EQ(ErrorStatus::INVALID_ARGUMENT, static_cast<ErrorStatus>(executeLaunchStatus));
 
@@ -88,7 +88,7 @@ static void validate(const sp<IPreparedModel>& preparedModel, const std::string&
         SCOPED_TRACE(message + " [executeSynchronously_1_3]");
 
         Return<void> executeStatus = preparedModel->executeSynchronously_1_3(
-                request, measure, deadline,
+                request, measure, deadline, {},
                 [](ErrorStatus error, const hidl_vec<OutputShape>& outputShapes,
                    const Timing& timing) {
                     ASSERT_EQ(ErrorStatus::INVALID_ARGUMENT, error);
@@ -142,16 +142,14 @@ static void validate(const sp<IPreparedModel>& preparedModel, const std::string&
     // dispatch
     {
         SCOPED_TRACE(message + " [executeFenced]");
-        Return<void> ret = preparedModel->executeFenced(
-                request, {}, MeasureTiming::NO, {}, {},
-                [](ErrorStatus error, const hidl_handle& handle,
-                   const sp<IFencedExecutionCallback>& callback) {
-                    if (error != ErrorStatus::DEVICE_UNAVAILABLE) {
-                        ASSERT_EQ(ErrorStatus::INVALID_ARGUMENT, error);
-                    }
-                    ASSERT_EQ(handle.getNativeHandle(), nullptr);
-                    ASSERT_EQ(callback, nullptr);
-                });
+        Return<void> ret =
+                preparedModel->executeFenced(request, {}, MeasureTiming::NO, deadline, {}, {},
+                                             [](ErrorStatus error, const hidl_handle& handle,
+                                                const sp<IFencedExecutionCallback>& callback) {
+                                                 ASSERT_EQ(ErrorStatus::INVALID_ARGUMENT, error);
+                                                 ASSERT_EQ(handle.getNativeHandle(), nullptr);
+                                                 ASSERT_EQ(callback, nullptr);
+                                             });
         ASSERT_TRUE(ret.isOk());
     }
 }
@@ -198,7 +196,7 @@ void validateRequest(const sp<IPreparedModel>& preparedModel, const Request& req
 void validateRequestFailure(const sp<IPreparedModel>& preparedModel, const Request& request) {
     SCOPED_TRACE("Expecting request to fail [executeSynchronously_1_3]");
     Return<void> executeStatus = preparedModel->executeSynchronously_1_3(
-            request, MeasureTiming::NO, {},
+            request, MeasureTiming::NO, {}, {},
             [](ErrorStatus error, const hidl_vec<OutputShape>& outputShapes, const Timing& timing) {
                 ASSERT_NE(ErrorStatus::NONE, error);
                 EXPECT_EQ(outputShapes.size(), 0);
