@@ -320,8 +320,7 @@ bool avb_verification_enabled() {
 bool verify_attestation_record(const string& challenge, const string& app_id,
                                AuthorizationSet expected_sw_enforced,
                                AuthorizationSet expected_hw_enforced, SecurityLevel security_level,
-                               const hidl_vec<uint8_t>& attestation_cert,
-                               std::chrono::time_point<std::chrono::system_clock> creation_time) {
+                               const hidl_vec<uint8_t>& attestation_cert) {
     X509_Ptr cert(parse_cert_blob(attestation_cert));
     EXPECT_TRUE(!!cert.get());
     if (!cert.get()) return false;
@@ -353,11 +352,11 @@ bool verify_attestation_record(const string& challenge, const string& app_id,
     EXPECT_EQ(ErrorCode::OK, error);
     if (error != ErrorCode::OK) return false;
 
-    EXPECT_TRUE(att_attestation_version == 3);
+    EXPECT_GE(att_attestation_version, 3U);
 
     expected_sw_enforced.push_back(TAG_ATTESTATION_APPLICATION_ID, HidlBuf(app_id));
 
-    EXPECT_EQ(att_keymaster_version, 4U);
+    EXPECT_GE(att_keymaster_version, 4U);
     EXPECT_EQ(security_level, att_keymaster_security_level);
     EXPECT_EQ(security_level, att_attestation_security_level);
 
@@ -398,14 +397,18 @@ bool verify_attestation_record(const string& challenge, const string& app_id,
     // true. A provided boolean tag that can be pulled back out of the certificate indicates correct
     // encoding. No need to check if it's in both lists, since the AuthorizationSet compare below
     // will handle mismatches of tags.
-    EXPECT_TRUE(expected_hw_enforced.Contains(TAG_NO_AUTH_REQUIRED));
+    if (security_level == SecurityLevel::SOFTWARE) {
+        EXPECT_TRUE(expected_sw_enforced.Contains(TAG_NO_AUTH_REQUIRED));
+    } else {
+        EXPECT_TRUE(expected_hw_enforced.Contains(TAG_NO_AUTH_REQUIRED));
+    }
 
     // Alternatively this checks the opposite - a false boolean tag (one that isn't provided in
     // the authorization list during key generation) isn't being attested to in the certificate.
+    EXPECT_FALSE(expected_sw_enforced.Contains(TAG_TRUSTED_USER_PRESENCE_REQUIRED));
+    EXPECT_FALSE(att_sw_enforced.Contains(TAG_TRUSTED_USER_PRESENCE_REQUIRED));
     EXPECT_FALSE(expected_hw_enforced.Contains(TAG_TRUSTED_USER_PRESENCE_REQUIRED));
     EXPECT_FALSE(att_hw_enforced.Contains(TAG_TRUSTED_USER_PRESENCE_REQUIRED));
-
-    KeymasterHidlTest::CheckCreationDateTime(att_sw_enforced, creation_time);
 
     if (att_hw_enforced.Contains(TAG_ALGORITHM, Algorithm::EC)) {
         // For ECDSA keys, either an EC_CURVE or a KEY_SIZE can be specified, but one must be.
@@ -464,10 +467,10 @@ bool verify_attestation_record(const string& challenge, const string& app_id,
                             verified_boot_key.size()));
     } else if (!strcmp(property_value, "red")) {
         EXPECT_EQ(verified_boot_state, KM_VERIFIED_BOOT_FAILED);
-        EXPECT_EQ(0, memcmp(verified_boot_key.data(), empty_boot_key.data(),
-                            verified_boot_key.size()));
     } else {
-        EXPECT_TRUE(false);
+        EXPECT_EQ(verified_boot_state, KM_VERIFIED_BOOT_UNVERIFIED);
+        EXPECT_NE(0, memcmp(verified_boot_key.data(), empty_boot_key.data(),
+                            verified_boot_key.size()));
     }
 
     att_sw_enforced.Sort();
@@ -559,24 +562,6 @@ TEST_P(NewKeyGenerationTest, Rsa) {
 }
 
 /*
- * NewKeyGenerationTest.RsaCheckCreationDateTime
- *
- * Verifies that creation date time is correct.
- */
-TEST_P(NewKeyGenerationTest, RsaCheckCreationDateTime) {
-    KeyCharacteristics key_characteristics;
-    auto creation_time = std::chrono::system_clock::now();
-    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
-                                                 .Authorization(TAG_NO_AUTH_REQUIRED)
-                                                 .RsaSigningKey(2048, 3)
-                                                 .Digest(Digest::NONE)
-                                                 .Padding(PaddingMode::NONE)));
-    GetCharacteristics(key_blob_, &key_characteristics);
-    AuthorizationSet sw_enforced = key_characteristics.softwareEnforced;
-    CheckCreationDateTime(sw_enforced, creation_time);
-}
-
-/*
  * NewKeyGenerationTest.NoInvalidRsaSizes
  *
  * Verifies that keymaster cannot generate any RSA key sizes that are designated as invalid.
@@ -638,23 +623,6 @@ TEST_P(NewKeyGenerationTest, Ecdsa) {
 
         CheckedDeleteKey(&key_blob);
     }
-}
-
-/*
- * NewKeyGenerationTest.EcCheckCreationDateTime
- *
- * Verifies that creation date time is correct.
- */
-TEST_P(NewKeyGenerationTest, EcCheckCreationDateTime) {
-    KeyCharacteristics key_characteristics;
-    auto creation_time = std::chrono::system_clock::now();
-    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
-                                                 .Authorization(TAG_NO_AUTH_REQUIRED)
-                                                 .EcdsaSigningKey(256)
-                                                 .Digest(Digest::NONE)));
-    GetCharacteristics(key_blob_, &key_characteristics);
-    AuthorizationSet sw_enforced = key_characteristics.softwareEnforced;
-    CheckCreationDateTime(sw_enforced, creation_time);
 }
 
 /*
@@ -877,6 +845,8 @@ TEST_P(NewKeyGenerationTest, HmacDigestNone) {
                               .Digest(Digest::NONE)
                               .Authorization(TAG_MIN_MAC_LENGTH, 128)));
 }
+
+INSTANTIATE_KEYMASTER_HIDL_TEST(NewKeyGenerationTest);
 
 typedef KeymasterHidlTest SigningOperationsTest;
 
@@ -1547,6 +1517,8 @@ TEST_P(SigningOperationsTest, HmacRfc4231TestCase5) {
     }
 }
 
+INSTANTIATE_KEYMASTER_HIDL_TEST(SigningOperationsTest);
+
 typedef KeymasterHidlTest VerificationOperationsTest;
 
 /*
@@ -1787,6 +1759,8 @@ TEST_P(VerificationOperationsTest, HmacSigningKeyCannotVerify) {
     CheckedDeleteKey(&verification_key);
 }
 
+INSTANTIATE_KEYMASTER_HIDL_TEST(VerificationOperationsTest);
+
 typedef KeymasterHidlTest ExportKeyTest;
 
 /*
@@ -1865,6 +1839,8 @@ TEST_P(ExportKeyTest, AesKeyUnexportable) {
     EXPECT_EQ(ErrorCode::UNSUPPORTED_KEY_FORMAT, ExportKey(KeyFormat::PKCS8, &export_data));
     EXPECT_EQ(ErrorCode::UNSUPPORTED_KEY_FORMAT, ExportKey(KeyFormat::RAW, &export_data));
 }
+
+INSTANTIATE_KEYMASTER_HIDL_TEST(ExportKeyTest);
 
 class ImportKeyTest : public KeymasterHidlTest {
    public:
@@ -2131,6 +2107,8 @@ TEST_P(ImportKeyTest, HmacKeySuccess) {
     VerifyMessage(message, signature, AuthorizationSetBuilder().Digest(Digest::SHA_2_256));
 }
 
+INSTANTIATE_KEYMASTER_HIDL_TEST(ImportKeyTest);
+
 auto wrapped_key = hex2str(
     "3082017902010004820100934bf94e2aa28a3f83c9f79297250262fbe3276b5a1c91159bbfa3ef8957aac84b59b30b"
     "455a79c2973480823d8b3863c3deef4a8e243590268d80e18751a0e130f67ce6a1ace9f79b95e097474febc981195b"
@@ -2251,6 +2229,8 @@ TEST_P(ImportWrappedKeyTest, WrongPurpose) {
                       .Digest(Digest::SHA_2_256)
                       .Padding(PaddingMode::RSA_OAEP)));
 }
+
+INSTANTIATE_KEYMASTER_HIDL_TEST(ImportWrappedKeyTest);
 
 typedef KeymasterHidlTest EncryptionOperationsTest;
 
@@ -2645,8 +2625,10 @@ TEST_P(EncryptionOperationsTest, AesWrongPurpose) {
                                    .Padding(PaddingMode::NONE));
     ASSERT_EQ(ErrorCode::OK, err) << "Got " << err;
 
-    err = Begin(KeyPurpose::DECRYPT,
-                AuthorizationSetBuilder().BlockMode(BlockMode::GCM).Padding(PaddingMode::NONE));
+    err = Begin(KeyPurpose::DECRYPT, AuthorizationSetBuilder()
+                                             .BlockMode(BlockMode::GCM)
+                                             .Padding(PaddingMode::NONE)
+                                             .Authorization(TAG_MAC_LENGTH, 128));
     EXPECT_EQ(ErrorCode::INCOMPATIBLE_PURPOSE, err) << "Got " << err;
 
     CheckedDeleteKey();
@@ -2659,8 +2641,10 @@ TEST_P(EncryptionOperationsTest, AesWrongPurpose) {
                                                  .Authorization(TAG_MIN_MAC_LENGTH, 128)
                                                  .Padding(PaddingMode::NONE)));
 
-    err = Begin(KeyPurpose::ENCRYPT,
-                AuthorizationSetBuilder().BlockMode(BlockMode::GCM).Padding(PaddingMode::NONE));
+    err = Begin(KeyPurpose::ENCRYPT, AuthorizationSetBuilder()
+                                             .BlockMode(BlockMode::GCM)
+                                             .Padding(PaddingMode::NONE)
+                                             .Authorization(TAG_MAC_LENGTH, 128));
     EXPECT_EQ(ErrorCode::INCOMPATIBLE_PURPOSE, err) << "Got " << err;
 }
 
@@ -4145,6 +4129,8 @@ TEST_P(EncryptionOperationsTest, TripleDesCbcIncrementalNoPadding) {
     EXPECT_EQ(message, plaintext);
 }
 
+INSTANTIATE_KEYMASTER_HIDL_TEST(EncryptionOperationsTest);
+
 typedef KeymasterHidlTest MaxOperationsTest;
 
 /*
@@ -4200,6 +4186,8 @@ TEST_P(MaxOperationsTest, TestLimitRsa) {
     EXPECT_EQ(ErrorCode::KEY_MAX_OPS_EXCEEDED, Begin(KeyPurpose::SIGN, params));
 }
 
+INSTANTIATE_KEYMASTER_HIDL_TEST(MaxOperationsTest);
+
 typedef KeymasterHidlTest AddEntropyTest;
 
 /*
@@ -4230,6 +4218,8 @@ TEST_P(AddEntropyTest, AddLargeEntropy) {
     EXPECT_EQ(ErrorCode::OK, keymaster().addRngEntropy(HidlBuf(string(2 * 1024, 'a'))));
 }
 
+INSTANTIATE_KEYMASTER_HIDL_TEST(AddEntropyTest);
+
 typedef KeymasterHidlTest AttestationTest;
 
 /*
@@ -4238,7 +4228,6 @@ typedef KeymasterHidlTest AttestationTest;
  * Verifies that attesting to RSA keys works and generates the expected output.
  */
 TEST_P(AttestationTest, RsaAttestation) {
-    auto creation_time = std::chrono::system_clock::now();
     ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
                                              .Authorization(TAG_NO_AUTH_REQUIRED)
                                              .RsaSigningKey(2048, 65537)
@@ -4263,7 +4252,7 @@ TEST_P(AttestationTest, RsaAttestation) {
     EXPECT_TRUE(verify_attestation_record("challenge", "foo",                     //
                                           key_characteristics_.softwareEnforced,  //
                                           key_characteristics_.hardwareEnforced,  //
-                                          SecLevel(), cert_chain[0], creation_time));
+                                          SecLevel(), cert_chain[0]));
 }
 
 /*
@@ -4292,7 +4281,6 @@ TEST_P(AttestationTest, RsaAttestationRequiresAppId) {
  * Verifies that attesting to EC keys works and generates the expected output.
  */
 TEST_P(AttestationTest, EcAttestation) {
-    auto creation_time = std::chrono::system_clock::now();
     ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
                                              .Authorization(TAG_NO_AUTH_REQUIRED)
                                              .EcdsaSigningKey(EcCurve::P_256)
@@ -4314,7 +4302,7 @@ TEST_P(AttestationTest, EcAttestation) {
     EXPECT_TRUE(verify_attestation_record("challenge", "foo",                     //
                                           key_characteristics_.softwareEnforced,  //
                                           key_characteristics_.hardwareEnforced,  //
-                                          SecLevel(), cert_chain[0], creation_time));
+                                          SecLevel(), cert_chain[0]));
 }
 
 /*
@@ -4347,7 +4335,6 @@ TEST_P(AttestationTest, EcAttestationRequiresAttestationAppId) {
 TEST_P(AttestationTest, AttestationApplicationIDLengthProperlyEncoded) {
     std::vector<uint32_t> app_id_lengths{143, 258};
     for (uint32_t length : app_id_lengths) {
-        auto creation_time = std::chrono::system_clock::now();
         ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
                                                      .Authorization(TAG_NO_AUTH_REQUIRED)
                                                      .EcdsaSigningKey(EcCurve::P_256)
@@ -4365,7 +4352,7 @@ TEST_P(AttestationTest, AttestationApplicationIDLengthProperlyEncoded) {
         EXPECT_TRUE(verify_attestation_record("challenge", app_id,                    //
                                               key_characteristics_.softwareEnforced,  //
                                               key_characteristics_.hardwareEnforced,  //
-                                              SecLevel(), cert_chain[0], creation_time));
+                                              SecLevel(), cert_chain[0]));
         CheckedDeleteKey();
     }
 }
@@ -4409,6 +4396,8 @@ TEST_P(AttestationTest, HmacAttestation) {
                             .Authorization(TAG_ATTESTATION_APPLICATION_ID, HidlBuf("foo")),
                         &cert_chain));
 }
+
+INSTANTIATE_KEYMASTER_HIDL_TEST(AttestationTest);
 
 typedef KeymasterHidlTest KeyDeletionTest;
 
@@ -4515,6 +4504,8 @@ TEST_P(KeyDeletionTest, DeleteAllKeys) {
     }
 }
 
+INSTANTIATE_KEYMASTER_HIDL_TEST(KeyDeletionTest);
+
 using UpgradeKeyTest = KeymasterHidlTest;
 
 /*
@@ -4533,6 +4524,8 @@ TEST_P(UpgradeKeyTest, UpgradeKey) {
     // Key doesn't need upgrading.  Should get okay, but no new key blob.
     EXPECT_EQ(result, std::make_pair(ErrorCode::OK, HidlBuf()));
 }
+
+INSTANTIATE_KEYMASTER_HIDL_TEST(UpgradeKeyTest);
 
 using ClearOperationsTest = KeymasterHidlTest;
 
@@ -4570,51 +4563,14 @@ TEST_P(ClearOperationsTest, TooManyOperations) {
     AbortIfNeeded();
 }
 
-/*
- * ClearSlotsTest.ServiceDeath
- *
- * Verifies that the service is restarted after death and the ongoing
- * operations are cleared.
- */
-TEST_P(ClearOperationsTest, ServiceDeath) {
-    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
-                                             .Authorization(TAG_NO_AUTH_REQUIRED)
-                                             .RsaEncryptionKey(2048, 65537)
-                                             .Padding(PaddingMode::NONE)));
-
-    auto params = AuthorizationSetBuilder().Padding(PaddingMode::NONE);
-    int max_operations = SecLevel() == SecurityLevel::STRONGBOX ? 4 : 16;
-    OperationHandle op_handles[max_operations];
-    AuthorizationSet out_params;
-    for(int i=0; i<max_operations; i++) {
-        EXPECT_EQ(ErrorCode::OK, Begin(KeyPurpose::ENCRYPT, key_blob_, params, &out_params, &(op_handles[i])));
-    }
-    EXPECT_EQ(ErrorCode::TOO_MANY_OPERATIONS,
-         Begin(KeyPurpose::ENCRYPT, key_blob_, params, &out_params, &op_handle_));
-
-    DebugInfo debug_info;
-    GetDebugInfo(&debug_info);
-    kill(debug_info.pid, SIGKILL);
-    // wait 1 second for keymaster to restart
-    sleep(1);
-    InitializeKeymaster();
-
-    for(int i=0; i<max_operations; i++) {
-        EXPECT_EQ(ErrorCode::OK, Begin(KeyPurpose::ENCRYPT, key_blob_, params, &out_params, &(op_handles[i])));
-    }
-    EXPECT_EQ(ErrorCode::TOO_MANY_OPERATIONS,
-         Begin(KeyPurpose::ENCRYPT, key_blob_, params, &out_params, &op_handle_));
-    for(int i=0; i<max_operations; i++) {
-        EXPECT_EQ(ErrorCode::OK, Abort(op_handles[i]));
-    }
-}
+INSTANTIATE_KEYMASTER_HIDL_TEST(ClearOperationsTest);
 
 typedef KeymasterHidlTest TransportLimitTest;
 
 /*
- * TransportLimitTest.LargeFinishInput
+ * TransportLimitTest.FinishInput
  *
- * Verifies that passing large input data to finish either succeeds or fails as expected.
+ * Verifies that passing input data to finish succeeds as expected.
  */
 TEST_P(TransportLimitTest, LargeFinishInput) {
     ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
@@ -4623,7 +4579,7 @@ TEST_P(TransportLimitTest, LargeFinishInput) {
                                                  .BlockMode(BlockMode::ECB)
                                                  .Padding(PaddingMode::NONE)));
 
-    for (int msg_size = 10 /*1KB*/; msg_size <= 17 /*128KB*/; msg_size++) {
+    for (int msg_size = 8 /* 256 bytes */; msg_size <= 11 /* 2 KiB */; msg_size++) {
         auto cipher_params =
                 AuthorizationSetBuilder().BlockMode(BlockMode::ECB).Padding(PaddingMode::NONE);
 
@@ -4634,71 +4590,22 @@ TEST_P(TransportLimitTest, LargeFinishInput) {
         string encrypted_message;
         auto rc = Finish(plain_message, &encrypted_message);
 
-        if (rc == ErrorCode::OK) {
-            EXPECT_EQ(plain_message.size(), encrypted_message.size())
-                    << "Encrypt finish returned OK, but did not consume all of the given input";
-        } else {
-            EXPECT_EQ(ErrorCode::INVALID_INPUT_LENGTH, rc)
-                    << "Encrypt finish failed in an unexpected way when given a large input";
-            continue;
-        }
+        EXPECT_EQ(ErrorCode::OK, rc);
+        EXPECT_EQ(plain_message.size(), encrypted_message.size())
+                << "Encrypt finish returned OK, but did not consume all of the given input";
         cipher_params.push_back(out_params);
 
         EXPECT_EQ(ErrorCode::OK, Begin(KeyPurpose::DECRYPT, cipher_params));
 
         string decrypted_message;
         rc = Finish(encrypted_message, &decrypted_message);
-
-        if (rc == ErrorCode::OK) {
-            EXPECT_EQ(plain_message.size(), decrypted_message.size())
-                    << "Decrypt finish returned OK, did not consume all of the given input";
-        } else {
-            EXPECT_EQ(ErrorCode::INVALID_INPUT_LENGTH, rc)
-                    << "Encrypt finish failed in an unexpected way when given a large input";
-        }
+        EXPECT_EQ(ErrorCode::OK, rc);
+        EXPECT_EQ(plain_message.size(), decrypted_message.size())
+                << "Decrypt finish returned OK, did not consume all of the given input";
     }
-
-    CheckedDeleteKey();
 }
 
-static const auto kKeymasterDeviceChoices =
-        testing::ValuesIn(android::hardware::getAllHalInstanceNames(IKeymasterDevice::descriptor));
-
-INSTANTIATE_TEST_SUITE_P(PerInstance, NewKeyGenerationTest, kKeymasterDeviceChoices,
-                         android::hardware::PrintInstanceNameToString);
-
-INSTANTIATE_TEST_SUITE_P(PerInstance, ImportKeyTest, kKeymasterDeviceChoices,
-                         android::hardware::PrintInstanceNameToString);
-
-INSTANTIATE_TEST_SUITE_P(PerInstance, ImportWrappedKeyTest, kKeymasterDeviceChoices,
-                         android::hardware::PrintInstanceNameToString);
-
-INSTANTIATE_TEST_SUITE_P(PerInstance, SigningOperationsTest, kKeymasterDeviceChoices,
-                         android::hardware::PrintInstanceNameToString);
-
-INSTANTIATE_TEST_SUITE_P(PerInstance, VerificationOperationsTest, kKeymasterDeviceChoices,
-                         android::hardware::PrintInstanceNameToString);
-
-INSTANTIATE_TEST_SUITE_P(PerInstance, ExportKeyTest, kKeymasterDeviceChoices,
-                         android::hardware::PrintInstanceNameToString);
-
-INSTANTIATE_TEST_SUITE_P(PerInstance, EncryptionOperationsTest, kKeymasterDeviceChoices,
-                         android::hardware::PrintInstanceNameToString);
-
-INSTANTIATE_TEST_SUITE_P(PerInstance, MaxOperationsTest, kKeymasterDeviceChoices,
-                         android::hardware::PrintInstanceNameToString);
-
-INSTANTIATE_TEST_SUITE_P(PerInstance, AddEntropyTest, kKeymasterDeviceChoices,
-                         android::hardware::PrintInstanceNameToString);
-
-INSTANTIATE_TEST_SUITE_P(PerInstance, AttestationTest, kKeymasterDeviceChoices,
-                         android::hardware::PrintInstanceNameToString);
-
-INSTANTIATE_TEST_SUITE_P(PerInstance, KeyDeletionTest, kKeymasterDeviceChoices,
-                         android::hardware::PrintInstanceNameToString);
-
-INSTANTIATE_TEST_SUITE_P(PerInstance, TransportLimitTest, kKeymasterDeviceChoices,
-                         android::hardware::PrintInstanceNameToString);
+INSTANTIATE_KEYMASTER_HIDL_TEST(TransportLimitTest);
 
 }  // namespace test
 }  // namespace V4_0

@@ -32,7 +32,6 @@
 #include "GeneratedTestHarness.h"
 #include "MemoryUtils.h"
 #include "TestHarness.h"
-#include "Utils.h"
 #include "VtsHalNeuralnetworks.h"
 
 // Forward declaration of the mobilenet generated test models in
@@ -207,10 +206,10 @@ TestModel createLargeTestModelImpl(TestOperationType op, uint32_t len) {
     };
 
     return {
-            .operands = std::move(operands),
-            .operations = std::move(operations),
-            .inputIndexes = {1},
-            .outputIndexes = {len * 2 + 1},
+            .main = {.operands = std::move(operands),
+                     .operations = std::move(operations),
+                     .inputIndexes = {1},
+                     .outputIndexes = {len * 2 + 1}},
             .isRelaxed = false,
     };
 }

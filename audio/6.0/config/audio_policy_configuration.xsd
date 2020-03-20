@@ -66,6 +66,7 @@
     </xs:element>
     <xs:complexType name="globalConfiguration">
         <xs:attribute name="speaker_drc_enabled" type="xs:boolean" use="required"/>
+        <xs:attribute name="engine_library" type="engineSuffix" use="optional"/>
     </xs:complexType>
     <xs:complexType name="modules">
         <xs:annotation>
@@ -550,6 +551,7 @@
             <xs:enumeration value="AUDIO_STREAM_DTMF"/>
             <xs:enumeration value="AUDIO_STREAM_TTS"/>
             <xs:enumeration value="AUDIO_STREAM_ACCESSIBILITY"/>
+            <xs:enumeration value="AUDIO_STREAM_ASSISTANT"/>
             <xs:enumeration value="AUDIO_STREAM_REROUTING"/>
             <xs:enumeration value="AUDIO_STREAM_PATCH"/>
         </xs:restriction>
@@ -622,4 +624,10 @@
             </xs:element>
         </xs:sequence>
     </xs:complexType>
+    <xs:simpleType name="engineSuffix">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="default"/>
+            <xs:enumeration value="configurable"/>
+        </xs:restriction>
+    </xs:simpleType>
 </xs:schema>

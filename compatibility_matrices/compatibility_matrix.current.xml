@@ -9,7 +9,6 @@
     </hal>
     <hal format="hidl" optional="false">
         <name>android.hardware.audio</name>
-        <version>5.0</version>
         <version>6.0</version>
         <interface>
             <name>IDevicesFactory</name>
@@ -18,7 +17,6 @@
     </hal>
     <hal format="hidl" optional="false">
         <name>android.hardware.audio.effect</name>
-        <version>5.0</version>
         <version>6.0</version>
         <interface>
             <name>IEffectsFactory</name>
@@ -167,7 +165,7 @@
     </hal>
     <hal format="hidl" optional="true">
         <name>android.hardware.dumpstate</name>
-        <version>1.0</version>
+        <version>1.1</version>
         <interface>
             <name>IDumpstateDevice</name>
             <instance>default</instance>
@@ -237,6 +235,13 @@
             <instance>default</instance>
         </interface>
     </hal>
+    <hal format="aidl" optional="true">
+        <name>android.hardware.identity</name>
+        <interface>
+            <name>IIdentityCredentialStore</name>
+            <instance>default</instance>
+        </interface>
+    </hal>
     <hal format="hidl" optional="true">
         <name>android.hardware.ir</name>
         <version>1.0</version>
@@ -275,6 +280,13 @@
         <version>2.0</version>
         <interface>
             <name>ILight</name>
+            <instance>default</instance>
+        </interface>
+    </hal>
+    <hal format="aidl" optional="true">
+        <name>android.hardware.light</name>
+        <interface>
+            <name>ILights</name>
             <instance>default</instance>
         </interface>
     </hal>
@@ -331,9 +343,8 @@
             <instance>default</instance>
         </interface>
     </hal>
-    <hal format="hidl" optional="true">
+    <hal format="aidl" optional="false">
         <name>android.hardware.power</name>
-        <version>1.0-3</version>
         <interface>
             <name>IPower</name>
             <instance>default</instance>
@@ -367,7 +378,10 @@
     </hal>
     <hal format="hidl" optional="true">
         <name>android.hardware.radio.config</name>
-        <version>1.3</version>
+        <!--
+        See compatibility_matrix.4.xml on versioning of radio config HAL.
+        -->
+        <version>1.1</version>
         <interface>
             <name>IRadioConfig</name>
             <instance>default</instance>
@@ -383,7 +397,7 @@
     </hal>
     <hal format="hidl" optional="true">
         <name>android.hardware.secure_element</name>
-        <version>1.0</version>
+        <version>1.0-2</version>
         <interface>
             <name>ISecureElement</name>
             <regex-instance>eSE[1-9][0-9]*</regex-instance>
@@ -466,14 +480,6 @@
     </hal>
     <hal format="aidl" optional="true">
         <name>android.hardware.vibrator</name>
-        <interface>
-            <name>IVibrator</name>
-            <instance>default</instance>
-        </interface>
-    </hal>
-    <hal format="hidl" optional="true">
-        <name>android.hardware.vibrator</name>
-        <version>1.0-3</version>
         <interface>
             <name>IVibrator</name>
             <instance>default</instance>

@@ -158,12 +158,31 @@ interface IVibrator {
     int getCompositionSizeMax();
 
     /**
+     * List of supported effect primitive.
+     *
+     * Return the effect primitives which are supported by the compose API.
+     * Implementations are expected to support all primitives of the interface
+     * version that they implement.
+     */
+    CompositePrimitive[] getSupportedPrimitives();
+
+    /**
+     * Retrieve effect primitive's duration in milliseconds.
+     *
+     * Support is reflected in getCapabilities (CAP_COMPOSE_EFFECTS).
+     *
+     * @return Best effort estimation of effect primitive's duration.
+     * @param primitive Effect primitive being queried.
+     */
+    int getPrimitiveDuration(CompositePrimitive primitive);
+
+    /**
      * Fire off a string of effect primitives, combined to perform richer effects.
      *
      * Support is reflected in getCapabilities (CAP_COMPOSE_EFFECTS).
      *
      * Doing this operation while the vibrator is already on is undefined behavior. Clients should
-     * explicitly call off.
+     * explicitly call off. IVibratorCallback.onComplete() support is required for this API.
      *
      * @param composite Array of composition parameters.
      */
@@ -183,6 +202,12 @@ interface IVibrator {
      * once enabled and assigned an effect to play. This may not be supported
      * and this support is reflected in getCapabilities (CAP_ALWAYS_ON_CONTROL).
      *
+     * The always-on source ID is conveyed directly to clients through
+     * device/board configuration files ensuring that no ID is assigned to
+     * multiple clients. No client should use this API unless explicitly
+     * assigned an always-on source ID. Clients must develop their own way to
+     * get IDs from vendor in a stable way.
+     *
      * @param id The device-specific always-on source ID to enable.
      * @param effect The type of haptic event to trigger.
      * @param strength The intensity of haptic event to trigger.
@@ -192,6 +217,12 @@ interface IVibrator {
     /**
      * Disable an always-on haptic source. This may not be supported and this
      * support is reflected in getCapabilities (CAP_ALWAYS_ON_CONTROL).
+     *
+     * The always-on source ID is conveyed directly to clients through
+     * device/board configuration files ensuring that no ID is assigned to
+     * multiple clients. No client should use this API unless explicitly
+     * assigned an always-on source ID. Clients must develop their own way to
+     * get IDs from vendor in a stable way.
      *
      * @param id The device-specific always-on source ID to disable.
      */
