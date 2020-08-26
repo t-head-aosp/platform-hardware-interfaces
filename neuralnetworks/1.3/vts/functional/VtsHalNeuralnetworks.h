@@ -21,6 +21,7 @@
 #include <android/hardware/neuralnetworks/1.3/IPreparedModel.h>
 #include <android/hardware/neuralnetworks/1.3/types.h>
 #include <gtest/gtest.h>
+#include <vector>
 #include "1.0/Utils.h"
 #include "1.3/Callbacks.h"
 
@@ -41,6 +42,7 @@ std::string printNeuralnetworksHidlTest(
         const testing::TestParamInfo<NeuralnetworksHidlTestParam>& info);
 
 #define INSTANTIATE_DEVICE_TEST(TestSuite)                                                 \
+    GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(TestSuite);                              \
     INSTANTIATE_TEST_SUITE_P(PerInstance, TestSuite, testing::ValuesIn(getNamedDevices()), \
                              printNeuralnetworksHidlTest)
 

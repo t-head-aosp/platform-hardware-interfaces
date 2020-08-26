@@ -264,7 +264,9 @@ struct Operand {
      * If a tensor operand's dimensions are not fully specified, the
      * dimensions of the operand are deduced from the operand
      * dimensions and values of the operation for which that operand
-     * is an output.
+     * is an output or from the corresponding {@link OperationType::IF} or
+     * {@link OperationType::WHILE} operation input operand dimensions in the
+     * case of referenced subgraph input operands.
      *
      * In the following situations, a tensor operand's dimensions must
      * be fully specified:
@@ -272,8 +274,8 @@ struct Operand {
      *     . The operand has lifetime CONSTANT_COPY or
      *       CONSTANT_REFERENCE.
      *
-     *     . The operand has lifetime SUBGRAPH_INPUT. Fully
-     *       specified dimensions must either be present in the
+     *     . The operand has lifetime SUBGRAPH_INPUT and belongs to the main
+     *       subgraph. Fully specified dimensions must either be present in the
      *       Operand or they must be provided in the corresponding
      *       RequestArgument.
      *       EXCEPTION: If the input is optional and omitted
@@ -301,15 +303,18 @@ struct Operand {
     /**
      * Quantized scale of the operand.
      *
-     * Only applicable if the operand is of type TENSOR_QUANT8_ASYMM or
-     * TENSOR_INT32.
+     * Must be 0 when not applicable to an operand type.
+     *
+     * See {@link OperandType}.
      */
     float scale;
 
     /**
      * Quantized zero-point offset of the operand.
      *
-     * Only applicable if the operand is of type TENSOR_QUANT8_ASYMM.
+     * Must be 0 when not applicable to an operand type.
+     *
+     * See {@link OperandType}.
      */
     int32_t zeroPoint;
 
@@ -503,8 +508,8 @@ struct Request {
      * Input data and information to be used in the execution of a prepared
      * model.
      *
-     * The index of the input corresponds to the index in Model.inputIndexes.
-     *   E.g., input[i] corresponds to Model.inputIndexes[i].
+     * The index of the input corresponds to the index in Model.main.inputIndexes.
+     *   E.g., input[i] corresponds to Model.main.inputIndexes[i].
      */
     vec<RequestArgument> inputs;
 
@@ -512,8 +517,8 @@ struct Request {
      * Output data and information to be used in the execution of a prepared
      * model.
      *
-     * The index of the output corresponds to the index in Model.outputIndexes.
-     *   E.g., output[i] corresponds to Model.outputIndexes[i].
+     * The index of the output corresponds to the index in Model.main.outputIndexes.
+     *   E.g., output[i] corresponds to Model.main.outputIndexes[i].
      */
     vec<RequestArgument> outputs;
 
