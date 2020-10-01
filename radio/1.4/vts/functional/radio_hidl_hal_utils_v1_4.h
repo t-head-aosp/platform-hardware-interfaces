@@ -64,6 +64,7 @@ class RadioResponse_v1_4 : public ::android::hardware::radio::V1_4::IRadioRespon
 
     // Call
     hidl_vec<::android::hardware::radio::V1_2::Call> currentCalls;
+    ::android::hardware::radio::V1_2::VoiceRegStateResult voiceRegResp;
 
     // Modem
     bool isModemEnabled;
@@ -721,7 +722,10 @@ class RadioHidlTest_v1_4 : public ::testing::TestWithParam<std::string> {
     /* Update Sim Card Status */
     void updateSimCardStatus();
 
-   public:
+    /* Stop Network Scan Command */
+    void stopNetworkScan();
+
+  public:
     virtual void SetUp() override;
 
     /* Used as a mechanism to inform the test about data/event callback */

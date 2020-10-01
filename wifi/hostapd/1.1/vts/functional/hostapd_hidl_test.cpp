@@ -58,7 +58,10 @@ class HostapdHidlTest
         ASSERT_NE(hostapd_.get(), nullptr);
     }
 
-    virtual void TearDown() override { stopHostapd(wifi_instance_name_); }
+    virtual void TearDown() override {
+        HIDL_INVOKE_VOID_WITHOUT_ARGUMENTS(hostapd_, terminate);
+        stopHostapd(wifi_instance_name_);
+    }
 
    protected:
     std::string getPrimaryWlanIfaceName() {
@@ -233,7 +236,11 @@ TEST_P(HostapdHidlTest, AddOpenAccessPointWithAcs) {
 TEST_P(HostapdHidlTest, AddPskAccessPointWithoutAcs) {
     auto status = HIDL_INVOKE(hostapd_, addAccessPoint_1_1,
                               getIfaceParamsWithoutAcs(), getPskNwParams());
-    EXPECT_EQ(HostapdStatusCode::SUCCESS, status.code);
+    // FAILURE_UNKNOWN is used by higher versions to indicate this API is no
+    // longer supported (replaced by an upgraded API)
+    if (status.code != HostapdStatusCode::FAILURE_UNKNOWN) {
+        EXPECT_EQ(HostapdStatusCode::SUCCESS, status.code);
+    }
 }
 
 /**
@@ -243,7 +250,11 @@ TEST_P(HostapdHidlTest, AddPskAccessPointWithoutAcs) {
 TEST_P(HostapdHidlTest, AddOpenAccessPointWithoutAcs) {
     auto status = HIDL_INVOKE(hostapd_, addAccessPoint_1_1,
                               getIfaceParamsWithoutAcs(), getOpenNwParams());
-    EXPECT_EQ(HostapdStatusCode::SUCCESS, status.code);
+    // FAILURE_UNKNOWN is used by higher versions to indicate this API is no
+    // longer supported (replaced by an upgraded API)
+    if (status.code != HostapdStatusCode::FAILURE_UNKNOWN) {
+        EXPECT_EQ(HostapdStatusCode::SUCCESS, status.code);
+    }
 }
 
 /**
@@ -269,10 +280,14 @@ TEST_P(HostapdHidlTest, RemoveAccessPointWithAcs) {
 TEST_P(HostapdHidlTest, RemoveAccessPointWithoutAcs) {
     auto status = HIDL_INVOKE(hostapd_, addAccessPoint_1_1,
                               getIfaceParamsWithoutAcs(), getPskNwParams());
-    EXPECT_EQ(HostapdStatusCode::SUCCESS, status.code);
-    status =
-        HIDL_INVOKE(hostapd_, removeAccessPoint, getPrimaryWlanIfaceName());
-    EXPECT_EQ(HostapdStatusCode::SUCCESS, status.code);
+    // FAILURE_UNKNOWN is used by higher versions to indicate this API is no
+    // longer supported (replaced by an upgraded API)
+    if (status.code != HostapdStatusCode::FAILURE_UNKNOWN) {
+        EXPECT_EQ(HostapdStatusCode::SUCCESS, status.code);
+        status =
+            HIDL_INVOKE(hostapd_, removeAccessPoint, getPrimaryWlanIfaceName());
+        EXPECT_EQ(HostapdStatusCode::SUCCESS, status.code);
+    }
 }
 
 /**
@@ -297,6 +312,7 @@ TEST_P(HostapdHidlTest, AddInvalidPskAccessPointWithoutAcs) {
     EXPECT_NE(HostapdStatusCode::SUCCESS, status.code);
 }
 
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(HostapdHidlTest);
 INSTANTIATE_TEST_CASE_P(
     PerInstance, HostapdHidlTest,
     testing::Combine(

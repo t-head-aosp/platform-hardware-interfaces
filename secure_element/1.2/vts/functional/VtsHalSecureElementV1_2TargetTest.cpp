@@ -85,6 +85,7 @@ class SecureElementHidlTest : public ::testing::TestWithParam<std::string> {
  * Reset:
  * Calls reset()
  * Checks status
+ * Check onStateChange is received with connected state set to false
  * Check onStateChange is received with connected state set to true
  */
 TEST_P(SecureElementHidlTest, Reset) {
@@ -92,9 +93,14 @@ TEST_P(SecureElementHidlTest, Reset) {
 
     auto res = se_cb_->WaitForCallback(kCallbackNameOnStateChange);
     EXPECT_TRUE(res.no_timeout);
+    EXPECT_FALSE(res.args->state_);
+
+    res = se_cb_->WaitForCallback(kCallbackNameOnStateChange);
+    EXPECT_TRUE(res.no_timeout);
     EXPECT_TRUE(res.args->state_);
 }
 
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SecureElementHidlTest);
 INSTANTIATE_TEST_SUITE_P(
         PerInstance, SecureElementHidlTest,
         testing::ValuesIn(android::hardware::getAllHalInstanceNames(ISecureElement::descriptor)),
