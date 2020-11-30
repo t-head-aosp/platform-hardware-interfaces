@@ -63,6 +63,15 @@ TEST_P(GnssHalTest, TestGnssMeasurementExtension) {
     auto gnssMeasurement_1_0 = gnss_hal_->getExtensionGnssMeasurement();
     ASSERT_TRUE(gnssMeasurement_2_1.isOk() && gnssMeasurement_2_0.isOk() &&
                 gnssMeasurement_1_1.isOk() && gnssMeasurement_1_0.isOk());
+
+    // CDD does not require Android Automotive OS devices to support
+    // GnssMeasurements.
+    if (Utils::isAutomotiveDevice()) {
+        ALOGI("Test GnssMeasurementExtension skipped. Android Automotive OS de  ice is not "
+              "required to support GNSS measurements.");
+        return;
+    }
+
     sp<IGnssMeasurement_2_1> iGnssMeas_2_1 = gnssMeasurement_2_1;
     sp<IGnssMeasurement_2_0> iGnssMeas_2_0 = gnssMeasurement_2_0;
     sp<IGnssMeasurement_1_1> iGnssMeas_1_1 = gnssMeasurement_1_1;
@@ -247,8 +256,10 @@ TEST_P(GnssHalTest, TestGnssSvInfoFields) {
     ALOGD("Observed %d GnssSvStatus, while awaiting one location (%d received)",
           sv_info_list_cbq_size, location_called_count);
 
-    hidl_vec<IGnssCallback_2_1::GnssSvInfo> last_sv_info_list;
-    ASSERT_TRUE(gnss_cb_->sv_info_list_cbq_.retrieve(last_sv_info_list, 1));
+    // Get the last sv_info_list
+    std::list<hidl_vec<IGnssCallback_2_1::GnssSvInfo>> sv_info_vec_list;
+    gnss_cb_->sv_info_list_cbq_.retrieve(sv_info_vec_list, sv_info_list_cbq_size, 1);
+    hidl_vec<IGnssCallback_2_1::GnssSvInfo> last_sv_info_list = sv_info_vec_list.back();
 
     bool nonZeroCn0Found = false;
     for (auto sv_info : last_sv_info_list) {
