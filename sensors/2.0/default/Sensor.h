@@ -26,6 +26,7 @@
 #include <vector>
 
 using ::android::hardware::sensors::V1_0::Event;
+using ::android::hardware::sensors::V1_0::EventPayload;
 using ::android::hardware::sensors::V1_0::OperationMode;
 using ::android::hardware::sensors::V1_0::Result;
 using ::android::hardware::sensors::V1_0::SensorInfo;
@@ -60,6 +61,7 @@ class Sensor {
    protected:
     void run();
     virtual std::vector<Event> readEvents();
+    virtual void readEventPayload(EventPayload&) {}
     static void startThread(Sensor* sensor);
 
     bool isWakeUpSensor();
@@ -96,6 +98,9 @@ class OnChangeSensor : public Sensor {
 class AccelSensor : public Sensor {
    public:
     AccelSensor(int32_t sensorHandle, ISensorsEventCallback* callback);
+
+  protected:
+    virtual void readEventPayload(EventPayload& payload) override;
 };
 
 class GyroSensor : public Sensor {
@@ -116,6 +121,9 @@ class DeviceTempSensor : public OnChangeSensor {
 class PressureSensor : public Sensor {
    public:
     PressureSensor(int32_t sensorHandle, ISensorsEventCallback* callback);
+
+  protected:
+    virtual void readEventPayload(EventPayload& payload) override;
 };
 
 class MagnetometerSensor : public Sensor {
