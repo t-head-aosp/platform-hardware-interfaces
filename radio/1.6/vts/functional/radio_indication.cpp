@@ -25,6 +25,18 @@ Return<void> RadioIndication_v1_6::dataCallListChanged_1_6(
     return Void();
 }
 
+Return<void> RadioIndication_v1_6::unthrottleApn(RadioIndicationType /*type*/,
+                                                 const ::android::hardware::hidl_string& /*apn*/) {
+    return Void();
+}
+
+Return<void> RadioIndication_v1_6::currentPhysicalChannelConfigs_1_6(
+        RadioIndicationType /*type*/,
+        const ::android::hardware::hidl_vec<
+                ::android::hardware::radio::V1_6::PhysicalChannelConfig>& /*configs*/) {
+    return Void();
+}
+
 /* 1.5 Apis */
 Return<void> RadioIndication_v1_6::uiccApplicationsEnablementChanged(RadioIndicationType /*type*/,
                                                                      bool /*enabled*/) {
@@ -116,6 +128,12 @@ Return<void> RadioIndication_v1_6::cellInfoList_1_2(
 Return<void> RadioIndication_v1_6::currentLinkCapacityEstimate(
         RadioIndicationType /*type*/,
         const ::android::hardware::radio::V1_2::LinkCapacityEstimate& /*lce*/) {
+    return Void();
+}
+
+Return<void> RadioIndication_v1_6::currentLinkCapacityEstimate_1_6(
+        RadioIndicationType /*type*/,
+        const ::android::hardware::radio::V1_6::LinkCapacityEstimate& /*lce*/) {
     return Void();
 }
 
@@ -373,5 +391,24 @@ Return<void> RadioIndication_v1_6::pcoData(RadioIndicationType /*type*/,
 
 Return<void> RadioIndication_v1_6::modemReset(RadioIndicationType /*type*/,
                                               const ::android::hardware::hidl_string& /*reason*/) {
+    return Void();
+}
+
+Return<void> RadioIndication_v1_6::currentSignalStrength_1_6(
+        RadioIndicationType /*type*/,
+        const ::android::hardware::radio::V1_6::SignalStrength& /*signalStrength*/) {
+    return Void();
+}
+
+Return<void> RadioIndication_v1_6::networkScanResult_1_6(
+        RadioIndicationType /*type*/,
+        const ::android::hardware::radio::V1_6::NetworkScanResult& /*result*/) {
+    return Void();
+}
+
+Return<void> RadioIndication_v1_6::cellInfoList_1_6(
+        RadioIndicationType /*type*/,
+        const ::android::hardware::hidl_vec<
+                ::android::hardware::radio::V1_6::CellInfo>& /*records*/) {
     return Void();
 }
