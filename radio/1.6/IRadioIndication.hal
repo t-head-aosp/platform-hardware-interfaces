@@ -21,7 +21,9 @@ import @1.5::IRadioIndication;
 import @1.6::CellInfo;
 import @1.6::LinkCapacityEstimate;
 import @1.6::NetworkScanResult;
+import @1.6::SignalStrength;
 import @1.6::SetupDataCallResult;
+import @1.6::PhysicalChannelConfig;
 
 /**
  * Interface declaring unsolicited radio indications.
@@ -70,6 +72,18 @@ interface IRadioIndication extends @1.5::IRadioIndication {
      */
     oneway currentLinkCapacityEstimate_1_6(RadioIndicationType type, LinkCapacityEstimate lce);
 
+
+    /**
+     * Indicates current signal strength of the radio.
+     *
+     * This is identical to currentSignalStrength_1_4 but uses an updated version of
+     * SignalStrength.
+     *
+     * @param type Type of radio indication
+     * @param signalStrength SignalStrength information
+     */
+    oneway currentSignalStrength_1_6(RadioIndicationType type, SignalStrength signalStrength);
+
     /**
      * Report all of the current cell information known to the radio.
      *
@@ -88,4 +102,15 @@ interface IRadioIndication extends @1.5::IRadioIndication {
      * CellInfo.
      */
     oneway networkScanResult_1_6(RadioIndicationType type, NetworkScanResult result);
+
+    /**
+     * Indicates physical channel configurations.
+     *
+     * An empty configs list indicates that the radio is in idle mode.
+     *
+     * @param type Type of radio indication
+     * @param configs Vector of PhysicalChannelConfigs
+     */
+    oneway currentPhysicalChannelConfigs_1_6(RadioIndicationType type,
+            vec<PhysicalChannelConfig> configs);
 };

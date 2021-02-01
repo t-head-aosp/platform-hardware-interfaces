@@ -30,28 +30,35 @@
 #include <utility>
 #include <vector>
 
+// See hardware/interfaces/neuralnetworks/utils/README.md for more information on HIDL interface
+// lifetimes across processes and for protecting asynchronous calls across HIDL.
+
 namespace android::hardware::neuralnetworks::V1_2::utils {
 
-class PreparedModel final : public nn::IPreparedModel {
+// Class that adapts V1_2::IPreparedModel to nn::IPreparedModel.
+class PreparedModel final : public nn::IPreparedModel,
+                            public std::enable_shared_from_this<PreparedModel> {
     struct PrivateConstructorTag {};
 
   public:
     static nn::GeneralResult<std::shared_ptr<const PreparedModel>> create(
-            sp<V1_2::IPreparedModel> preparedModel);
+            sp<V1_2::IPreparedModel> preparedModel, bool executeSynchronously);
 
-    PreparedModel(PrivateConstructorTag tag, sp<V1_2::IPreparedModel> preparedModel,
-                  hal::utils::DeathHandler deathHandler);
+    PreparedModel(PrivateConstructorTag tag, bool executeSynchronously,
+                  sp<V1_2::IPreparedModel> preparedModel, hal::utils::DeathHandler deathHandler);
 
     nn::ExecutionResult<std::pair<std::vector<nn::OutputShape>, nn::Timing>> execute(
             const nn::Request& request, nn::MeasureTiming measure,
             const nn::OptionalTimePoint& deadline,
-            const nn::OptionalTimeoutDuration& loopTimeoutDuration) const override;
+            const nn::OptionalDuration& loopTimeoutDuration) const override;
 
     nn::GeneralResult<std::pair<nn::SyncFence, nn::ExecuteFencedInfoCallback>> executeFenced(
             const nn::Request& request, const std::vector<nn::SyncFence>& waitFor,
             nn::MeasureTiming measure, const nn::OptionalTimePoint& deadline,
-            const nn::OptionalTimeoutDuration& loopTimeoutDuration,
-            const nn::OptionalTimeoutDuration& timeoutDurationAfterFence) const override;
+            const nn::OptionalDuration& loopTimeoutDuration,
+            const nn::OptionalDuration& timeoutDurationAfterFence) const override;
+
+    nn::GeneralResult<nn::SharedBurst> configureExecutionBurst() const override;
 
     std::any getUnderlyingResource() const override;
 
@@ -61,6 +68,7 @@ class PreparedModel final : public nn::IPreparedModel {
     nn::ExecutionResult<std::pair<std::vector<nn::OutputShape>, nn::Timing>> executeAsynchronously(
             const V1_0::Request& request, MeasureTiming measure) const;
 
+    const bool kExecuteSynchronously;
     const sp<V1_2::IPreparedModel> kPreparedModel;
     const hal::utils::DeathHandler kDeathHandler;
 };

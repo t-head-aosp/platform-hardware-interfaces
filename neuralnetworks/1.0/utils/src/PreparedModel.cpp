@@ -16,6 +16,7 @@
 
 #include "PreparedModel.h"
 
+#include "Burst.h"
 #include "Callbacks.h"
 #include "Conversions.h"
 #include "Utils.h"
@@ -34,13 +35,15 @@
 #include <utility>
 #include <vector>
 
+// See hardware/interfaces/neuralnetworks/utils/README.md for more information on HIDL interface
+// lifetimes across processes and for protecting asynchronous calls across HIDL.
+
 namespace android::hardware::neuralnetworks::V1_0::utils {
 
 nn::GeneralResult<std::shared_ptr<const PreparedModel>> PreparedModel::create(
         sp<V1_0::IPreparedModel> preparedModel) {
     if (preparedModel == nullptr) {
-        return NN_ERROR(nn::ErrorStatus::INVALID_ARGUMENT)
-               << "V1_0::utils::PreparedModel::create must have non-null preparedModel";
+        return NN_ERROR() << "V1_0::utils::PreparedModel::create must have non-null preparedModel";
     }
 
     auto deathHandler = NN_TRY(hal::utils::DeathHandler::create(preparedModel));
@@ -55,7 +58,7 @@ PreparedModel::PreparedModel(PrivateConstructorTag /*tag*/, sp<V1_0::IPreparedMo
 nn::ExecutionResult<std::pair<std::vector<nn::OutputShape>, nn::Timing>> PreparedModel::execute(
         const nn::Request& request, nn::MeasureTiming /*measure*/,
         const nn::OptionalTimePoint& /*deadline*/,
-        const nn::OptionalTimeoutDuration& /*loopTimeoutDuration*/) const {
+        const nn::OptionalDuration& /*loopTimeoutDuration*/) const {
     // Ensure that request is ready for IPC.
     std::optional<nn::Request> maybeRequestInShared;
     const nn::Request& requestInShared = NN_TRY(hal::utils::makeExecutionFailure(
@@ -67,13 +70,8 @@ nn::ExecutionResult<std::pair<std::vector<nn::OutputShape>, nn::Timing>> Prepare
     const auto scoped = kDeathHandler.protectCallback(cb.get());
 
     const auto ret = kPreparedModel->execute(hidlRequest, cb);
-    const auto status =
-            NN_TRY(hal::utils::makeExecutionFailure(hal::utils::handleTransportError(ret)));
-    if (status != ErrorStatus::NONE) {
-        const auto canonical =
-                validatedConvertToCanonical(status).value_or(nn::ErrorStatus::GENERAL_FAILURE);
-        return NN_ERROR(canonical) << "execute failed with " << toString(status);
-    }
+    const auto status = HANDLE_TRANSPORT_FAILURE(ret);
+    HANDLE_HAL_STATUS(status) << "execution failed with " << toString(status);
 
     auto result = NN_TRY(cb->get());
     NN_TRY(hal::utils::makeExecutionFailure(
@@ -83,13 +81,18 @@ nn::ExecutionResult<std::pair<std::vector<nn::OutputShape>, nn::Timing>> Prepare
 }
 
 nn::GeneralResult<std::pair<nn::SyncFence, nn::ExecuteFencedInfoCallback>>
-PreparedModel::executeFenced(
-        const nn::Request& /*request*/, const std::vector<nn::SyncFence>& /*waitFor*/,
-        nn::MeasureTiming /*measure*/, const nn::OptionalTimePoint& /*deadline*/,
-        const nn::OptionalTimeoutDuration& /*loopTimeoutDuration*/,
-        const nn::OptionalTimeoutDuration& /*timeoutDurationAfterFence*/) const {
+PreparedModel::executeFenced(const nn::Request& /*request*/,
+                             const std::vector<nn::SyncFence>& /*waitFor*/,
+                             nn::MeasureTiming /*measure*/,
+                             const nn::OptionalTimePoint& /*deadline*/,
+                             const nn::OptionalDuration& /*loopTimeoutDuration*/,
+                             const nn::OptionalDuration& /*timeoutDurationAfterFence*/) const {
     return NN_ERROR(nn::ErrorStatus::GENERAL_FAILURE)
            << "IPreparedModel::executeFenced is not supported on 1.0 HAL service";
+}
+
+nn::GeneralResult<nn::SharedBurst> PreparedModel::configureExecutionBurst() const {
+    return Burst::create(shared_from_this());
 }
 
 std::any PreparedModel::getUnderlyingResource() const {

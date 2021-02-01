@@ -46,13 +46,14 @@ class ResilientDevice final : public nn::IDevice,
                              nn::Capabilities capabilities, nn::SharedDevice device);
 
     nn::SharedDevice getDevice() const EXCLUDES(mMutex);
-    nn::SharedDevice recover(const nn::IDevice* failingDevice, bool blocking) const
-            EXCLUDES(mMutex);
+    nn::GeneralResult<nn::SharedDevice> recover(const nn::IDevice* failingDevice,
+                                                bool blocking) const EXCLUDES(mMutex);
 
     const std::string& getName() const override;
     const std::string& getVersionString() const override;
     nn::Version getFeatureLevel() const override;
     nn::DeviceType getType() const override;
+    bool isUpdatable() const override;
     const std::vector<nn::Extension>& getSupportedExtensions() const override;
     const nn::Capabilities& getCapabilities() const override;
     std::pair<uint32_t, uint32_t> getNumberOfCacheFilesNeeded() const override;
@@ -81,17 +82,14 @@ class ResilientDevice final : public nn::IDevice,
   private:
     bool isValidInternal() const EXCLUDES(mMutex);
     nn::GeneralResult<nn::SharedPreparedModel> prepareModelInternal(
-            bool blocking, const nn::Model& model, nn::ExecutionPreference preference,
-            nn::Priority priority, nn::OptionalTimePoint deadline,
-            const std::vector<nn::SharedHandle>& modelCache,
+            const nn::Model& model, nn::ExecutionPreference preference, nn::Priority priority,
+            nn::OptionalTimePoint deadline, const std::vector<nn::SharedHandle>& modelCache,
             const std::vector<nn::SharedHandle>& dataCache, const nn::CacheToken& token) const;
     nn::GeneralResult<nn::SharedPreparedModel> prepareModelFromCacheInternal(
-            bool blocking, nn::OptionalTimePoint deadline,
-            const std::vector<nn::SharedHandle>& modelCache,
+            nn::OptionalTimePoint deadline, const std::vector<nn::SharedHandle>& modelCache,
             const std::vector<nn::SharedHandle>& dataCache, const nn::CacheToken& token) const;
     nn::GeneralResult<nn::SharedBuffer> allocateInternal(
-            bool blocking, const nn::BufferDesc& desc,
-            const std::vector<nn::SharedPreparedModel>& preparedModels,
+            const nn::BufferDesc& desc, const std::vector<nn::SharedPreparedModel>& preparedModels,
             const std::vector<nn::BufferRole>& inputRoles,
             const std::vector<nn::BufferRole>& outputRoles) const;
 

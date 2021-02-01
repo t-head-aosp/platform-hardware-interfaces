@@ -43,8 +43,8 @@
 #include PATH(android/hardware/audio/FILE_VERSION/types.h)
 #include PATH(android/hardware/audio/common/FILE_VERSION/types.h)
 #if MAJOR_VERSION >= 7
-#include <audio_policy_configuration_V7_0-enums.h>
-#include <audio_policy_configuration_V7_0.h>
+#include <android_audio_policy_configuration_V7_0-enums.h>
+#include <android_audio_policy_configuration_V7_0.h>
 #endif
 
 #include <fmq/EventFlag.h>
@@ -91,7 +91,7 @@ using namespace ::android::hardware::audio::CPP_VERSION;
 #if MAJOR_VERSION >= 7
 // Make an alias for enumerations generated from the APM config XSD.
 namespace xsd {
-using namespace ::audio::policy::configuration::CPP_VERSION;
+using namespace ::android::audio::policy::configuration::CPP_VERSION;
 }
 #endif
 
@@ -154,6 +154,21 @@ const PolicyConfig& getCachedPolicyConfig() {
         return config;
     }();
     return *policyConfig;
+}
+
+TEST(CheckConfig, audioPolicyConfigurationValidation) {
+    const auto factories = ::android::hardware::getAllHalInstanceNames(IDevicesFactory::descriptor);
+    if (factories.size() == 0) {
+        GTEST_SKIP() << "Skipping audioPolicyConfigurationValidation because no factory instances "
+                        "are found.";
+    }
+    RecordProperty("description",
+                   "Verify that the audio policy configuration file "
+                   "is valid according to the schema");
+
+    const char* xsd = "/data/local/tmp/audio_policy_configuration_" STRINGIFY(CPP_VERSION) ".xsd";
+    EXPECT_ONE_VALID_XML_MULTIPLE_LOCATIONS(kConfigFileName,
+                                            android::audio_get_configuration_paths(), xsd);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -230,21 +245,6 @@ class AudioHidlTestWithDeviceParameter : public HidlTest,
         return std::get<PARAM_DEVICE_NAME>(GetParam());
     }
 };
-
-TEST(CheckConfig, audioPolicyConfigurationValidation) {
-    auto deviceParameters = getDeviceParametersForFactoryTests();
-    if (deviceParameters.size() == 0) {
-        GTEST_SKIP() << "Skipping audioPolicyConfigurationValidation because no device parameter "
-                        "is found.";
-    }
-    RecordProperty("description",
-                   "Verify that the audio policy configuration file "
-                   "is valid according to the schema");
-
-    const char* xsd = "/data/local/tmp/audio_policy_configuration_" STRINGIFY(CPP_VERSION) ".xsd";
-    EXPECT_ONE_VALID_XML_MULTIPLE_LOCATIONS(kConfigFileName,
-                                            android::audio_get_configuration_paths(), xsd);
-}
 
 class AudioPolicyConfigTest : public AudioHidlTestWithDeviceParameter {
   public:
@@ -522,7 +522,9 @@ using DeviceConfigParameter = std::tuple<DeviceParameter, AudioConfig, std::vect
 
 #if MAJOR_VERSION >= 6
 const std::vector<DeviceConfigParameter>& getInputDeviceConfigParameters();
+const std::vector<DeviceConfigParameter>& getInputDeviceSingleConfigParameters();
 const std::vector<DeviceConfigParameter>& getOutputDeviceConfigParameters();
+const std::vector<DeviceConfigParameter>& getOutputDeviceSingleConfigParameters();
 #endif
 
 #if MAJOR_VERSION >= 4
@@ -883,7 +885,7 @@ class OpenStreamTest : public AudioHidlTestWithDeviceConfigParameter {
         AudioHidlTestWithDeviceConfigParameter::TearDown();
     }
 
-   protected:
+  protected:
     AudioConfig audioConfig;
     DeviceAddress address = {};
     sp<Stream> stream;
@@ -926,6 +928,8 @@ class OutputStreamTest : public OpenStreamTest<IStreamOut> {
     const SourceMetadata initMetadata = {
             { { toString(xsd::AudioUsage::AUDIO_USAGE_MEDIA),
                 toString(xsd::AudioContentType::AUDIO_CONTENT_TYPE_MUSIC),
+                {},
+                toString(xsd::AudioChannelMask::AUDIO_CHANNEL_OUT_STEREO),
                 1 /* gain */ } }};
 #endif
 };
@@ -971,7 +975,7 @@ class InputStreamTest : public OpenStreamTest<IStreamIn> {
         ASSERT_NO_FATAL_FAILURE(OpenStreamTest::SetUp());  // setup base
 #if MAJOR_VERSION <= 6
         address.device = AudioDevice::IN_DEFAULT;
-#elif MAJOR_VERSION <= 7
+#elif MAJOR_VERSION >= 7
         address.deviceType = toString(xsd::AudioDevice::AUDIO_DEVICE_IN_DEFAULT);
 #endif
         const AudioConfig& config = getConfig();
@@ -986,12 +990,15 @@ class InputStreamTest : public OpenStreamTest<IStreamIn> {
 
    protected:
 #if MAJOR_VERSION == 2
-    const AudioSource initMetadata = AudioSource::DEFAULT;
+     const AudioSource initMetadata = AudioSource::DEFAULT;
 #elif MAJOR_VERSION >= 4 && MAJOR_VERSION <= 6
      const SinkMetadata initMetadata = {{ {.source = AudioSource::DEFAULT, .gain = 1 } }};
 #elif MAJOR_VERSION >= 7
      const SinkMetadata initMetadata = {
-             {{.source = toString(xsd::AudioSource::AUDIO_SOURCE_DEFAULT), .gain = 1}}};
+             {{.source = toString(xsd::AudioSource::AUDIO_SOURCE_DEFAULT),
+               .gain = 1,
+               .tags = {},
+               .channelMask = toString(xsd::AudioChannelMask::AUDIO_CHANNEL_IN_MONO)}}};
 #endif
 };
 
@@ -1148,13 +1155,14 @@ static void testSetAudioProperties(IStream* stream) {
     for (const auto& profile : profiles) {
         for (const auto& sampleRate : profile.sampleRates) {
             for (const auto& channelMask : profile.channelMasks) {
-                AudioConfigBase config{.format = profile.format,
-                                       .sampleRateHz = sampleRate,
-                                       .channelMask = {{channelMask}}};
+                AudioConfigBaseOptional config;
+                config.format.value(profile.format);
+                config.sampleRateHz.value(sampleRate);
+                config.channelMask.value(channelMask);
                 auto ret = stream->setAudioProperties(config);
                 EXPECT_TRUE(ret.isOk());
-                EXPECT_EQ(Result::OK, ret) << config.format << "; " << config.sampleRateHz << "; "
-                                           << toString(config.channelMask);
+                EXPECT_EQ(Result::OK, ret)
+                        << profile.format << "; " << sampleRate << "; " << channelMask;
             }
         }
     }
@@ -1162,7 +1170,7 @@ static void testSetAudioProperties(IStream* stream) {
 
 TEST_IO_STREAM(SetAudioProperties, "Call setAudioProperties for all supported profiles",
                testSetAudioProperties(stream.get()))
-#endif
+#endif  // MAJOR_VERSION <= 6
 
 static void testGetAudioProperties(IStream* stream, AudioConfig expectedConfig) {
 #if MAJOR_VERSION <= 6
@@ -1179,9 +1187,11 @@ static void testGetAudioProperties(IStream* stream, AudioConfig expectedConfig) 
     EXPECT_EQ(expectedConfig.channelMask, mask);
     EXPECT_EQ(expectedConfig.format, format);
 #elif MAJOR_VERSION >= 7
+    Result res;
     AudioConfigBase actualConfig{};
-    auto ret = stream->getAudioProperties(returnIn(actualConfig));
+    auto ret = stream->getAudioProperties(returnIn(res, actualConfig));
     EXPECT_TRUE(ret.isOk());
+    EXPECT_EQ(Result::OK, res);
     EXPECT_EQ(expectedConfig.base.sampleRateHz, actualConfig.sampleRateHz);
     EXPECT_EQ(expectedConfig.base.channelMask, actualConfig.channelMask);
     EXPECT_EQ(expectedConfig.base.format, actualConfig.format);

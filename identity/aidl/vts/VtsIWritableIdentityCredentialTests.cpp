@@ -29,7 +29,7 @@
 #include <future>
 #include <map>
 
-#include "VtsIdentityTestUtils.h"
+#include "Util.h"
 
 namespace android::hardware::identity {
 
@@ -182,7 +182,7 @@ TEST_P(IdentityCredentialTests, verifyStartPersonalizationLarge) {
                                                     false /* testCredential */));
 
     // Verify set a large number of profile count and entry count is ok
-    const vector<int32_t> entryCounts = {3000};
+    const vector<int32_t> entryCounts = {255};
     writableCredential->setExpectedProofOfProvisioningSize(123456);
     result = writableCredential->startPersonalization(25, entryCounts);
     EXPECT_TRUE(result.isOk()) << result.exceptionCode() << "; " << result.exceptionMessage()
