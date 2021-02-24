@@ -16,6 +16,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <algorithm>
 
 #define LOG_TAG "HidlUtils"
 #include <log/log.h>
@@ -281,7 +282,7 @@ status_t HidlUtils::audioGainModeMaskFromHal(audio_gain_mode_t halGainModeMask,
                                              hidl_vec<AudioGainMode>* gainModeMask) {
     status_t status = NO_ERROR;
     std::vector<AudioGainMode> result;
-    for (uint32_t bit = 0; bit < sizeof(audio_gain_mode_t) * 8; ++bit) {
+    for (uint32_t bit = 0; halGainModeMask != 0 && bit < sizeof(audio_gain_mode_t) * 8; ++bit) {
         audio_gain_mode_t flag = static_cast<audio_gain_mode_t>(1u << bit);
         if ((flag & halGainModeMask) == flag) {
             AudioGainMode flagStr = audio_gain_mode_to_string(flag);
@@ -291,6 +292,7 @@ status_t HidlUtils::audioGainModeMaskFromHal(audio_gain_mode_t halGainModeMask,
                 ALOGE("Unknown audio gain mode value 0x%X", flag);
                 status = BAD_VALUE;
             }
+            halGainModeMask = static_cast<audio_gain_mode_t>(halGainModeMask & ~flag);
         }
     }
     *gainModeMask = result;
@@ -333,25 +335,35 @@ status_t HidlUtils::audioSourceToHal(const AudioSource& source, audio_source_t* 
     return BAD_VALUE;
 }
 
+// The "default" value of audio_stream_type_t is represented by an empty string.
 status_t HidlUtils::audioStreamTypeFromHal(audio_stream_type_t halStreamType,
                                            AudioStreamType* streamType) {
-    *streamType = audio_stream_type_to_string(halStreamType);
-    if (!streamType->empty() && !xsd::isUnknownAudioStreamType(*streamType)) {
+    if (halStreamType != AUDIO_STREAM_DEFAULT) {
+        *streamType = audio_stream_type_to_string(halStreamType);
+        if (!streamType->empty() && !xsd::isUnknownAudioStreamType(*streamType)) {
+            return NO_ERROR;
+        }
+        ALOGE("Unknown audio stream type value 0x%X", halStreamType);
+        return BAD_VALUE;
+    } else {
+        *streamType = "";
         return NO_ERROR;
     }
-    ALOGE("Unknown audio stream type value 0x%X", halStreamType);
-    return BAD_VALUE;
 }
 
 status_t HidlUtils::audioStreamTypeToHal(const AudioStreamType& streamType,
                                          audio_stream_type_t* halStreamType) {
-    if (!xsd::isUnknownAudioStreamType(streamType) &&
-        audio_stream_type_from_string(streamType.c_str(), halStreamType)) {
+    if (!streamType.empty()) {
+        if (!xsd::isUnknownAudioStreamType(streamType) &&
+            audio_stream_type_from_string(streamType.c_str(), halStreamType)) {
+            return NO_ERROR;
+        }
+        ALOGE("Unknown audio stream type \"%s\"", streamType.c_str());
+        return BAD_VALUE;
+    } else {
+        *halStreamType = AUDIO_STREAM_DEFAULT;
         return NO_ERROR;
     }
-    ALOGE("Unknown audio stream type \"%s\"", streamType.c_str());
-    *halStreamType = AUDIO_STREAM_DEFAULT;
-    return BAD_VALUE;
 }
 
 status_t HidlUtils::audioConfigFromHal(const audio_config_t& halConfig, bool isInput,
@@ -858,15 +870,17 @@ status_t HidlUtils::audioProfileToHal(const AudioProfile& profile,
     return result;
 }
 
-status_t HidlUtils::audioTagsFromHal(const char* halTags, hidl_vec<AudioTag>* tags) {
-    std::vector<std::string> strTags = utils::splitString(halTags, sAudioTagSeparator);
+status_t HidlUtils::audioTagsFromHal(const std::vector<std::string>& strTags,
+                                     hidl_vec<AudioTag>* tags) {
     status_t result = NO_ERROR;
     tags->resize(strTags.size());
     size_t to = 0;
     for (size_t from = 0; from < strTags.size(); ++from) {
-        if (xsd::isVendorExtension(strTags[from])) {
-            (*tags)[to++] = strTags[from];
+        const auto& tag = strTags[from];
+        if (xsd::isVendorExtension(tag)) {
+            (*tags)[to++] = tag;
         } else {
+            ALOGE("Vendor extension tag is ill-formed: \"%s\"", tag.c_str());
             result = BAD_VALUE;
         }
     }
@@ -889,6 +903,7 @@ status_t HidlUtils::audioTagsToHal(const hidl_vec<AudioTag>& tags, char* halTags
             halTagsBuffer << tag;
             hasValue = true;
         } else {
+            ALOGE("Vendor extension tag is ill-formed: \"%s\"", tag.c_str());
             result = BAD_VALUE;
         }
     }
@@ -897,6 +912,31 @@ status_t HidlUtils::audioTagsToHal(const hidl_vec<AudioTag>& tags, char* halTags
     CONVERT_CHECKED(fullHalTags.length() <= AUDIO_ATTRIBUTES_TAGS_MAX_SIZE ? NO_ERROR : BAD_VALUE,
                     result);
     return result;
+}
+
+hidl_vec<AudioTag> HidlUtils::filterOutNonVendorTags(const hidl_vec<AudioTag>& tags) {
+    hidl_vec<AudioTag> result;
+    result.resize(tags.size());
+    size_t resultIdx = 0;
+    for (const auto& tag : tags) {
+        if (xsd::maybeVendorExtension(tag)) {
+            result[resultIdx++] = tag;
+        }
+    }
+    if (resultIdx != result.size()) {
+        result.resize(resultIdx);
+    }
+    return result;
+}
+
+std::vector<std::string> HidlUtils::filterOutNonVendorTags(const std::vector<std::string>& tags) {
+    std::vector<std::string> result;
+    std::copy_if(tags.begin(), tags.end(), std::back_inserter(result), xsd::maybeVendorExtension);
+    return result;
+}
+
+std::vector<std::string> HidlUtils::splitAudioTags(const char* halTags) {
+    return utils::splitString(halTags, sAudioTagSeparator);
 }
 
 status_t HidlUtils::deviceAddressFromHal(audio_devices_t halDeviceType,

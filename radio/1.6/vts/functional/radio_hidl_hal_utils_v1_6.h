@@ -70,7 +70,8 @@ class RadioResponse_v1_6 : public ::android::hardware::radio::V1_6::IRadioRespon
     ::android::hardware::radio::V1_6::RadioResponseInfo rspInfo;
 
     // Call
-    hidl_vec<::android::hardware::radio::V1_2::Call> currentCalls;
+    hidl_vec<::android::hardware::radio::V1_6::Call> currentCalls;
+    ::android::hardware::radio::V1_2::VoiceRegStateResult voiceRegResp;
 
     // Sms
     SendSmsResult sendSmsResult;
@@ -803,7 +804,8 @@ class RadioResponse_v1_6 : public ::android::hardware::radio::V1_6::IRadioRespon
             const ::android::hardware::radio::V1_6::RadioResponseInfo& info);
 
     Return<void> getSystemSelectionChannelsResponse(
-            const ::android::hardware::radio::V1_6::RadioResponseInfo& info);
+            const ::android::hardware::radio::V1_6::RadioResponseInfo& info,
+            const hidl_vec<::android::hardware::radio::V1_5::RadioAccessSpecifier>& specifier);
 
     Return<void> getSignalStrengthResponse_1_6(
             const ::android::hardware::radio::V1_6::RadioResponseInfo& info,
