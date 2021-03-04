@@ -227,7 +227,7 @@ GeneralResult<Model> unvalidatedConvert(const hal::V1_2::Model& model) {
 
     // Verify number of consumers.
     const auto numberOfConsumers =
-            hal::utils::countNumberOfConsumers(model.operands.size(), operations);
+            NN_TRY(hal::utils::countNumberOfConsumers(model.operands.size(), operations));
     CHECK(model.operands.size() == numberOfConsumers.size());
     for (size_t i = 0; i < model.operands.size(); ++i) {
         if (model.operands[i].numberOfConsumers != numberOfConsumers[i]) {
@@ -304,7 +304,11 @@ GeneralResult<Extension::OperandTypeInformation> unvalidatedConvert(
 }
 
 GeneralResult<SharedHandle> unvalidatedConvert(const hidl_handle& hidlHandle) {
-    return hal::utils::sharedHandleFromNativeHandle(hidlHandle.getNativeHandle());
+    if (hidlHandle.getNativeHandle() == nullptr) {
+        return nullptr;
+    }
+    auto handle = NN_TRY(hal::utils::sharedHandleFromNativeHandle(hidlHandle.getNativeHandle()));
+    return std::make_shared<const Handle>(std::move(handle));
 }
 
 GeneralResult<DeviceType> convert(const hal::V1_2::DeviceType& deviceType) {
@@ -365,7 +369,7 @@ nn::GeneralResult<hidl_vec<uint8_t>> unvalidatedConvert(
     return V1_0::utils::unvalidatedConvert(operandValues);
 }
 
-nn::GeneralResult<hidl_memory> unvalidatedConvert(const nn::Memory& memory) {
+nn::GeneralResult<hidl_memory> unvalidatedConvert(const nn::SharedMemory& memory) {
     return V1_0::utils::unvalidatedConvert(memory);
 }
 
@@ -525,7 +529,7 @@ nn::GeneralResult<Model> unvalidatedConvert(const nn::Model& model) {
 
     // Update number of consumers.
     const auto numberOfConsumers =
-            hal::utils::countNumberOfConsumers(operands.size(), model.main.operations);
+            NN_TRY(hal::utils::countNumberOfConsumers(operands.size(), model.main.operations));
     CHECK(operands.size() == numberOfConsumers.size());
     for (size_t i = 0; i < operands.size(); ++i) {
         operands[i].numberOfConsumers = numberOfConsumers[i];
@@ -588,7 +592,10 @@ nn::GeneralResult<Extension::OperandTypeInformation> unvalidatedConvert(
 }
 
 nn::GeneralResult<hidl_handle> unvalidatedConvert(const nn::SharedHandle& handle) {
-    return hal::utils::hidlHandleFromSharedHandle(handle);
+    if (handle == nullptr) {
+        return {};
+    }
+    return hal::utils::hidlHandleFromSharedHandle(*handle);
 }
 
 nn::GeneralResult<DeviceType> convert(const nn::DeviceType& deviceType) {

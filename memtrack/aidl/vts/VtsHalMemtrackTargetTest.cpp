@@ -46,17 +46,19 @@ class MemtrackAidlTest : public testing::TestWithParam<std::string> {
 
 TEST_P(MemtrackAidlTest, GetMemoryInvalidPid) {
     int pid = -1;
-    MemtrackType type = MemtrackType::OTHER;
-    std::vector<MemtrackRecord> records;
 
-    auto status = memtrack_->getMemory(pid, type, &records);
+    for (MemtrackType type : ndk::enum_range<MemtrackType>()) {
+        std::vector<MemtrackRecord> records;
 
-    EXPECT_EQ(status.getExceptionCode(), EX_ILLEGAL_ARGUMENT);
+        auto status = memtrack_->getMemory(pid, type, &records);
+
+        EXPECT_EQ(status.getExceptionCode(), EX_ILLEGAL_ARGUMENT);
+    }
 }
 
 TEST_P(MemtrackAidlTest, GetMemoryInvalidType) {
     int pid = 1;
-    MemtrackType type = MemtrackType::NUM_TYPES;
+    MemtrackType type = static_cast<MemtrackType>(-1);
     std::vector<MemtrackRecord> records;
 
     auto status = memtrack_->getMemory(pid, type, &records);
@@ -66,12 +68,13 @@ TEST_P(MemtrackAidlTest, GetMemoryInvalidType) {
 
 TEST_P(MemtrackAidlTest, GetMemory) {
     int pid = 1;
-    MemtrackType type = MemtrackType::OTHER;
-    std::vector<MemtrackRecord> records;
+    for (MemtrackType type : ndk::enum_range<MemtrackType>()) {
+        std::vector<MemtrackRecord> records;
 
-    auto status = memtrack_->getMemory(pid, type, &records);
+        auto status = memtrack_->getMemory(pid, type, &records);
 
-    EXPECT_TRUE(status.isOk());
+        EXPECT_TRUE(status.isOk());
+    }
 }
 
 TEST_P(MemtrackAidlTest, GetGpuDeviceInfo) {
@@ -79,15 +82,15 @@ TEST_P(MemtrackAidlTest, GetGpuDeviceInfo) {
 
     auto status = memtrack_->getGpuDeviceInfo(&device_info);
 
-    // Devices with < 5.10 kernels aren't required to provide an implementation of
+    // Devices with < 5.4 kernels aren't required to provide an implementation of
     // getGpuDeviceInfo(), and can return EX_UNSUPPORTED_OPERATION
     if (status.getExceptionCode() == EX_UNSUPPORTED_OPERATION) {
-        KernelVersion min_kernel_version = KernelVersion(5, 10, 0);
+        KernelVersion min_kernel_version = KernelVersion(5, 4, 0);
         KernelVersion kernel_version = VintfObject::GetInstance()
                                                ->getRuntimeInfo(RuntimeInfo::FetchFlag::CPU_VERSION)
                                                ->kernelVersion();
         EXPECT_LT(kernel_version, min_kernel_version)
-                << "Devices with 5.10 or later kernels must implement getGpuDeviceInfo()";
+                << "Devices with 5.4 or later kernels must implement getGpuDeviceInfo()";
         return;
     }
 

@@ -22,6 +22,7 @@ import android.hardware.security.keymint.SecurityLevel;
  * KeyMintHardwareInfo is the hardware information returned by calling KeyMint getHardwareInfo()
  */
 @VintfStability
+@RustDerive(Clone=true, Eq=true, PartialEq=true, Ord=true, PartialOrd=true, Hash=true)
 parcelable KeyMintHardwareInfo {
     /**
      * Implementation version of the keymint hardware.  The version number is implementation
@@ -33,7 +34,7 @@ parcelable KeyMintHardwareInfo {
 
     /* securityLevel is the security level of the IKeyMintDevice implementation accessed
      * through this aidl package.  */
-    SecurityLevel securityLevel;
+    SecurityLevel securityLevel = SecurityLevel.SOFTWARE;
 
     /* keyMintName is the name of the IKeyMintDevice implementation.  */
     @utf8InCpp String keyMintName;
@@ -44,4 +45,11 @@ parcelable KeyMintHardwareInfo {
      *         same author.
      */
     @utf8InCpp String keyMintAuthorName;
+
+    /* The timestampTokenRequired is a boolean flag, which when true reflects that IKeyMintDevice
+     * instance will expect a valid TimeStampToken with various operations. This will typically
+     * required by the StrongBox implementations that generally don't have secure clock hardware to
+     * generate timestamp tokens.
+     */
+    boolean timestampTokenRequired;
 }

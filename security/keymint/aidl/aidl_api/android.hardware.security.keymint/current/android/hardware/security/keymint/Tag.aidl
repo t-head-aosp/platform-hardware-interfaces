@@ -1,4 +1,18 @@
-///////////////////////////////////////////////////////////////////////////////
+/*
+ * Copyright (C) 2020 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *////////////////////////////////////////////////////////////////////////////////
 // THIS FILE IS IMMUTABLE. DO NOT EDIT IN ANY CASE.                          //
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -80,4 +94,9 @@ enum Tag {
   MAC_LENGTH = 805307371,
   RESET_SINCE_ID_ROTATION = 1879049196,
   CONFIRMATION_TOKEN = -1879047187,
+  CERTIFICATE_SERIAL = -2147482642,
+  CERTIFICATE_SUBJECT = -1879047185,
+  CERTIFICATE_NOT_BEFORE = 1610613744,
+  CERTIFICATE_NOT_AFTER = 1610613745,
+  MAX_BOOT_LEVEL = 805307378,
 }

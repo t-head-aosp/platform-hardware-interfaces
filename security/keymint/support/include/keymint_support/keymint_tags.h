@@ -126,6 +126,11 @@ DECLARE_TYPED_TAG(USER_ID);
 DECLARE_TYPED_TAG(USER_SECURE_ID);
 DECLARE_TYPED_TAG(VENDOR_PATCHLEVEL);
 DECLARE_TYPED_TAG(RSA_OAEP_MGF_DIGEST);
+DECLARE_TYPED_TAG(CERTIFICATE_SERIAL);
+DECLARE_TYPED_TAG(CERTIFICATE_SUBJECT);
+DECLARE_TYPED_TAG(CERTIFICATE_NOT_BEFORE);
+DECLARE_TYPED_TAG(CERTIFICATE_NOT_AFTER);
+DECLARE_TYPED_TAG(MAX_BOOT_LEVEL);
 
 #undef DECLARE_TYPED_TAG
 
@@ -326,7 +331,9 @@ template <TagType tag_type, Tag tag>
 inline std::optional<
         std::reference_wrapper<const typename TypedTag2ValueType<TypedTag<tag_type, tag>>::type>>
 authorizationValue(TypedTag<tag_type, tag> ttag, const KeyParameter& param) {
-    if (TypedTag2ValueType<TypedTag<tag_type, tag>>::unionTag != param.value.getTag()) return {};
+    // We only check if the parameter has the correct tag here; accessTagValue checks if the correct
+    // union field was initialized.
+    if (tag != param.tag) return {};
     return accessTagValue(ttag, param);
 }
 
