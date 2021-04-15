@@ -39,13 +39,13 @@ class RemotelyProvisionedComponent : public BnRemotelyProvisionedComponent {
                                              const std::vector<MacedPublicKey>& keysToSign,
                                              const std::vector<uint8_t>& endpointEncCertChain,
                                              const std::vector<uint8_t>& challenge,
-                                             std::vector<uint8_t>* keysToSignMac,
-                                             ProtectedData* protectedData) override;
+                                             DeviceInfo* deviceInfo, ProtectedData* protectedData,
+                                             std::vector<uint8_t>* keysToSignMac) override;
 
   private:
     // TODO(swillden): Move these into an appropriate Context class.
     std::vector<uint8_t> deriveBytesFromHbk(const std::string& context, size_t numBytes) const;
-    std::vector<uint8_t> createDeviceInfo() const;
+    std::unique_ptr<cppbor::Map> createDeviceInfo() const;
     std::pair<std::vector<uint8_t>, cppbor::Array> generateBcc();
 
     std::vector<uint8_t> macKey_ = deriveBytesFromHbk("Key to MAC public keys", 32);

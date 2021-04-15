@@ -19,6 +19,7 @@ package android.hardware.security.keymint;
 /**
  * ProtectedData contains the encrypted BCC and the ephemeral MAC key used to
  * authenticate the keysToSign (see keysToSignMac output argument).
+ * @hide
  */
 @VintfStability
 parcelable ProtectedData {
@@ -32,7 +33,7 @@ parcelable ProtectedData {
      *         unprotected: {
      *             5 : bstr .size 12       // IV
      *         },
-     *         ciphertext: bstr,           // AES-GCM-128(K, .cbor ProtectedDataPayload)
+     *         ciphertext: bstr,           // AES-GCM-256(K, .cbor ProtectedDataPayload)
      *         recipients : [
      *             [                       // COSE_Recipient
      *                 protected : bstr .cbor {

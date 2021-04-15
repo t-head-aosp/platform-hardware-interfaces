@@ -20,6 +20,7 @@ import android.hardware.common.NativeHandle;
 import android.hardware.neuralnetworks.ErrorStatus;
 import android.hardware.neuralnetworks.ExecutionResult;
 import android.hardware.neuralnetworks.FencedExecutionResult;
+import android.hardware.neuralnetworks.IBurst;
 import android.hardware.neuralnetworks.Request;
 
 /**
@@ -72,8 +73,8 @@ interface IPreparedModel {
      *                runs from the time the driver sees the call to the executeSynchronously
      *                function to the time the driver returns from the function.
      * @param deadline The time by which the execution is expected to complete. The time is measured
-     *                 in nanoseconds since epoch of the steady clock (as from
-     *                 std::chrono::steady_clock). If the execution cannot be finished by the
+     *                 in nanoseconds since boot (as from clock_gettime(CLOCK_BOOTTIME, &ts) or
+     *                 ::android::base::boot_clock). If the execution cannot be finished by the
      *                 deadline, the execution may be aborted. Passing -1 means the deadline is
      *                 omitted. Other negative values are invalid.
      * @param loopTimeoutDuration The maximum amount of time in nanoseconds that should be spent
@@ -137,8 +138,8 @@ interface IPreparedModel {
      *                sync fences have been signaled.
      * @param measure Specifies whether or not to measure duration of the execution.
      * @param deadline The time by which the execution is expected to complete. The time is measured
-     *                 in nanoseconds since epoch of the steady clock (as from
-     *                 std::chrono::steady_clock).If the execution cannot be finished by the
+     *                 in nanoseconds since boot (as from clock_gettime(CLOCK_BOOTTIME, &ts) or
+     *                 ::android::base::boot_clock). If the execution cannot be finished by the
      *                 deadline, the execution may be aborted. Passing -1 means the deadline is
      *                 omitted. Other negative values are invalid.
      * @param loopTimeoutDuration The maximum amount of time in nanoseconds that should be spent
@@ -166,4 +167,22 @@ interface IPreparedModel {
     FencedExecutionResult executeFenced(in Request request, in ParcelFileDescriptor[] waitFor,
             in boolean measureTiming, in long deadline, in long loopTimeoutDuration,
             in long duration);
+
+    /**
+     * Configure a Burst object used to execute multiple inferences on a prepared model in rapid
+     * succession.
+     *
+     * If the prepared model was prepared from a model wherein all tensor operands have fully
+     * specified dimensions, and a valid serialized Request is sent to the Burst for execution, and
+     * at execution time every operation's input operands have legal values, then the execution
+     * should complete successfully (ErrorStatus::NONE): There must be no failure unless the device
+     * itself is in a bad state.
+     *
+     * @return burst Execution burst controller object.
+     * @throws ServiceSpecificException with one of the following ErrorStatus values:
+     *     - DEVICE_UNAVAILABLE if driver is offline or busy
+     *     - GENERAL_FAILURE if there is an unspecified error
+     *     - RESOURCE_EXHAUSTED_* if the task was aborted by the driver
+     */
+    IBurst configureExecutionBurst();
 }

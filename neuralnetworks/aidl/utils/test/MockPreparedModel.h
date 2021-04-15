@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef ANDROID_HARDWARE_INTERFACES_NEURALNETWORKS_AIDL_UTILS_TEST_MOCK_PREPARED_MODEL
-#define ANDROID_HARDWARE_INTERFACES_NEURALNETWORKS_AIDL_UTILS_TEST_MOCK_PREPARED_MODEL
+#ifndef ANDROID_HARDWARE_INTERFACES_NEURALNETWORKS_AIDL_UTILS_TEST_MOCK_PREPARED_MODEL_H
+#define ANDROID_HARDWARE_INTERFACES_NEURALNETWORKS_AIDL_UTILS_TEST_MOCK_PREPARED_MODEL_H
 
 #include <aidl/android/hardware/neuralnetworks/BnPreparedModel.h>
 #include <android/binder_interface_utils.h>
@@ -39,6 +39,8 @@ class MockPreparedModel final : public BnPreparedModel {
                  bool measureTiming, int64_t deadline, int64_t loopTimeoutDuration,
                  int64_t duration, FencedExecutionResult* fencedExecutionResult),
                 (override));
+    MOCK_METHOD(ndk::ScopedAStatus, configureExecutionBurst, (std::shared_ptr<IBurst> * burst),
+                (override));
 };
 
 inline std::shared_ptr<MockPreparedModel> MockPreparedModel::create() {
@@ -47,4 +49,4 @@ inline std::shared_ptr<MockPreparedModel> MockPreparedModel::create() {
 
 }  // namespace aidl::android::hardware::neuralnetworks::utils
 
-#endif  // ANDROID_HARDWARE_INTERFACES_NEURALNETWORKS_AIDL_UTILS_TEST_MOCK_PREPARED_MODEL
+#endif  // ANDROID_HARDWARE_INTERFACES_NEURALNETWORKS_AIDL_UTILS_TEST_MOCK_PREPARED_MODEL_H

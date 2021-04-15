@@ -16,6 +16,7 @@
 
 package android.hardware.security.keymint;
 
+import android.hardware.security.keymint.DeviceInfo;
 import android.hardware.security.keymint.MacedPublicKey;
 import android.hardware.security.keymint.ProtectedData;
 
@@ -109,6 +110,7 @@ import android.hardware.security.keymint.ProtectedData;
  * The IRemotelyProvisionedComponent supports a test mode, allowing the generation of test key pairs
  * and test CertificateRequests. Test keys/requests are annotated as such, and the BCC used for test
  * CertificateRequests must contain freshly-generated keys, not the real BCC key pairs.
+ * @hide
  */
 @VintfStability
 interface IRemotelyProvisionedComponent {
@@ -200,7 +202,7 @@ interface IRemotelyProvisionedComponent {
      *                2 : bstr                        // KID : EEK ID
      *                3 : -25,                        // Algorithm : ECDH-ES + HKDF-256
      *                -1 : 4,                         // Curve : X25519
-     *                -2 : bstr                       // Ed25519 public key
+     *                -2 : bstr                       // X25519 public key
      *            }
      *
      *            EekSignatureInput = [
@@ -219,7 +221,7 @@ interface IRemotelyProvisionedComponent {
      *        in the chain, which implies that it must not attempt to validate the signature.
      *
      *        If testMode is false, the method must validate the chain signatures, and must verify
-     *        that the public key in the root certifictate is in its pre-configured set of
+     *        that the public key in the root certificate is in its pre-configured set of
      *        authorized EEK root keys. If the public key is not in the database, or if signature
      *        verification fails, the method must return STATUS_INVALID_EEK.
      *
@@ -256,7 +258,7 @@ interface IRemotelyProvisionedComponent {
      * @param out ProtectedData contains the encrypted BCC and the ephemeral MAC key used to
      *        authenticate the keysToSign (see keysToSignMac output argument).
      */
-    void generateCertificateRequest(in boolean testMode, in MacedPublicKey[] keysToSign,
-            in byte[] endpointEncryptionCertChain, in byte[] challenge, out byte[] keysToSignMac,
+    byte[] generateCertificateRequest(in boolean testMode, in MacedPublicKey[] keysToSign,
+            in byte[] endpointEncryptionCertChain, in byte[] challenge, out DeviceInfo deviceInfo,
             out ProtectedData protectedData);
 }
