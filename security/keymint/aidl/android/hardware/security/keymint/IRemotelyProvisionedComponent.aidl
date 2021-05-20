@@ -19,6 +19,7 @@ package android.hardware.security.keymint;
 import android.hardware.security.keymint.DeviceInfo;
 import android.hardware.security.keymint.MacedPublicKey;
 import android.hardware.security.keymint.ProtectedData;
+import android.hardware.security.keymint.RpcHardwareInfo;
 
 /**
  * An IRemotelyProvisionedComponent is a secure-side component for which certificates can be
@@ -77,7 +78,7 @@ import android.hardware.security.keymint.ProtectedData;
  * While a proper BCC, as described above, reflects the complete boot sequence from boot ROM to the
  * secure area image of the IRemotelyProvisionedComponent, it's also possible to use a "degenerate"
  * BCC which consists only of a single, self-signed certificate containing the public key of a
- * hardware-bound key pair. This is an appopriate solution for devices which haven't implemented
+ * hardware-bound key pair. This is an appropriate solution for devices which haven't implemented
  * everything necessary to produce a proper BCC, but can derive a unique key pair in the secure
  * area.  In this degenerate case, DK_pub is the same as KM_pub.
  *
@@ -119,6 +120,12 @@ interface IRemotelyProvisionedComponent {
     const int STATUS_PRODUCTION_KEY_IN_TEST_REQUEST = 3;
     const int STATUS_TEST_KEY_IN_PRODUCTION_REQUEST = 4;
     const int STATUS_INVALID_EEK = 5;
+
+    /**
+     * @return info which contains information about the underlying IRemotelyProvisionedComponent
+     *         hardware, such as version number, component name, author name, and supported curve.
+     */
+    RpcHardwareInfo getHardwareInfo();
 
     /**
      * generateKeyPair generates a new ECDSA P-256 key pair that can be certified.  Note that this
