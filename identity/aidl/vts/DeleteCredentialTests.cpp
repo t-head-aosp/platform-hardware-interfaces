@@ -102,7 +102,7 @@ void DeleteCredentialTests::provisionData() {
     ASSERT_TRUE(wc->addAccessControlProfile(1, {}, false, 0, 0, &sacp).isOk());
 
     // Single entry - don't care about the returned encrypted data
-    ASSERT_TRUE(wc->beginAddEntry({0}, "ns", "Some Data", 1).isOk());
+    ASSERT_TRUE(wc->beginAddEntry({1}, "ns", "Some Data", 1).isOk());
     vector<uint8_t> encryptedData;
     ASSERT_TRUE(wc->addEntryValue({9}, &encryptedData).isOk());
 
@@ -126,7 +126,7 @@ TEST_P(DeleteCredentialTests, Delete) {
     optional<vector<uint8_t>> proofOfDeletion =
             support::coseSignGetPayload(proofOfDeletionSignature);
     ASSERT_TRUE(proofOfDeletion);
-    string cborPretty = support::cborPrettyPrint(proofOfDeletion.value(), 32, {});
+    string cborPretty = cppbor::prettyPrint(proofOfDeletion.value(), 32, {});
     EXPECT_EQ("['ProofOfDeletion', 'org.iso.18013-5.2019.mdl', true, ]", cborPretty);
     EXPECT_TRUE(support::coseCheckEcDsaSignature(proofOfDeletionSignature, {},  // Additional data
                                                  credentialPubKey_));
@@ -153,7 +153,7 @@ TEST_P(DeleteCredentialTests, DeleteWithChallenge) {
     optional<vector<uint8_t>> proofOfDeletion =
             support::coseSignGetPayload(proofOfDeletionSignature);
     ASSERT_TRUE(proofOfDeletion);
-    string cborPretty = support::cborPrettyPrint(proofOfDeletion.value(), 32, {});
+    string cborPretty = cppbor::prettyPrint(proofOfDeletion.value(), 32, {});
     EXPECT_EQ("['ProofOfDeletion', 'org.iso.18013-5.2019.mdl', {0x41, 0x42, 0x43}, true, ]",
               cborPretty);
     EXPECT_TRUE(support::coseCheckEcDsaSignature(proofOfDeletionSignature, {},  // Additional data

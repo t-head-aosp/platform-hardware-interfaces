@@ -18,10 +18,6 @@ package android.hardware.security.keymint;
 
 import android.hardware.security.keymint.TagType;
 
-// TODO(seleneh) : note aidl currently does not support double nested enum definitions such as
-// ROOT_OF_TRUST = TagType:BYTES | 704.  So we are forced to write definations as
-// ROOT_OF_TRUST = (9 << 28) for now.  Will need to flip this back later when aidl support is added.
-
 /**
  * Tag specifies various kinds of tags that can be set in KeyParameter to identify what kind of
  * data are stored in KeyParameter.
@@ -33,7 +29,7 @@ enum Tag {
     /**
      * Tag::INVALID should never be set.  It means you hit an error.
      */
-    INVALID = (0 << 28) | 0,
+    INVALID = 0,
 
     /**
      * Tag::PURPOSE specifies the set of purposes for which the key may be used.  Possible values
@@ -47,7 +43,7 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    PURPOSE = (2 << 28) /* TagType:ENUM_REP */ | 1,
+    PURPOSE = TagType.ENUM_REP | 1,
 
     /**
      * Tag::ALGORITHM specifies the cryptographic algorithm with which the key is used.  This tag
@@ -56,10 +52,10 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    ALGORITHM = (1 << 28) /* TagType:ENUM */ | 2,
+    ALGORITHM = TagType.ENUM | 2,
 
     /**
-     * Tag::KEY_SIZE pecifies the size, in bits, of the key, measuring in the normal way for the
+     * Tag::KEY_SIZE specifies the size, in bits, of the key, measuring in the normal way for the
      * key's algorithm.  For example, for RSA keys, Tag::KEY_SIZE specifies the size of the public
      * modulus.  For AES keys it specifies the length of the secret key material.  For 3DES keys it
      * specifies the length of the key material, not counting parity bits (though parity bits must
@@ -68,20 +64,20 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    KEY_SIZE = (3 << 28) /* TagType:UINT */ | 3,
+    KEY_SIZE = TagType.UINT | 3,
 
     /**
      * Tag::BLOCK_MODE specifies the block cipher mode(s) with which the key may be used.  This tag
      * is only relevant to AES and 3DES keys.  Possible values are defined by the BlockMode enum.
      *
      * This tag is repeatable for key generation/import.  For AES and 3DES operations the caller
-     * must specify a Tag::BLOCK_MODE in the additionalParams argument of begin().  If the mode is
-     * missing or the specified mode is not in the modes specified for the key during
-     * generation/import, the operation must fail with ErrorCode::INCOMPATIBLE_BLOCK_MODE.
+     * must specify a Tag::BLOCK_MODE in the params argument of begin().  If the mode is missing or
+     * the specified mode is not in the modes specified for the key during generation/import, the
+     * operation must fail with ErrorCode::INCOMPATIBLE_BLOCK_MODE.
      *
      * Must be hardware-enforced.
      */
-    BLOCK_MODE = (2 << 28) /* TagType:ENUM_REP */ | 4,
+    BLOCK_MODE = TagType.ENUM_REP | 4,
 
     /**
      * Tag::DIGEST specifies the digest algorithms that may be used with the key to perform signing
@@ -89,13 +85,13 @@ enum Tag {
      * values are defined by the Digest enum.
      *
      * This tag is repeatable for key generation/import.  For signing and verification operations,
-     * the caller must specify a digest in the additionalParams argument of begin().  If the digest
-     * is missing or the specified digest is not in the digests associated with the key, the
-     * operation must fail with ErrorCode::INCOMPATIBLE_DIGEST.
+     * the caller must specify a digest in the params argument of begin().  If the digest is missing
+     * or the specified digest is not in the digests associated with the key, the operation must
+     * fail with ErrorCode::INCOMPATIBLE_DIGEST.
      *
      * Must be hardware-enforced.
      */
-    DIGEST = (2 << 28) /* TagType:ENUM_REP */ | 5,
+    DIGEST = TagType.ENUM_REP | 5,
 
     /**
      * Tag::PADDING specifies the padding modes that may be used with the key.  This tag is relevant
@@ -123,7 +119,7 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    PADDING = (2 << 28) /* TagType:ENUM_REP */ | 6,
+    PADDING = TagType.ENUM_REP | 6,
 
     /**
      * Tag::CALLER_NONCE specifies that the caller can provide a nonce for nonce-requiring
@@ -136,7 +132,7 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    CALLER_NONCE = (7 << 28) /* TagType:BOOL */ | 7,
+    CALLER_NONCE = TagType.BOOL | 7,
 
     /**
      * Tag::MIN_MAC_LENGTH specifies the minimum length of MAC that can be requested or verified
@@ -145,22 +141,21 @@ enum Tag {
      * This value is the minimum MAC length, in bits.  It must be a multiple of 8 bits.  For HMAC
      * keys, the value must be least 64 and no more than 512.  For GCM keys, the value must be at
      * least 96 and no more than 128.  If the provided value violates these requirements,
-     * generateKey() or importKey() must return ErrorCode::UNSUPPORTED_KEY_SIZE.
+     * generateKey() or importKey() must return ErrorCode::UNSUPPORTED_MIN_MAC_LENGTH.
      *
      * Must be hardware-enforced.
      */
-    MIN_MAC_LENGTH = (3 << 28) /* TagType:UINT */ | 8,
+    MIN_MAC_LENGTH = TagType.UINT | 8,
 
     // Tag 9 reserved
 
     /**
-     * Tag::EC_CURVE specifies the elliptic curve.  EC key generation requests may have
-     * Tag:EC_CURVE, Tag::KEY_SIZE, or both.  If both are provided and the size and curve do not
-     * match, IKeyMintDevice must return ErrorCode::INVALID_ARGUMENT.
+     * Tag::EC_CURVE specifies the elliptic curve.  Possible values are defined in the EcCurve
+     * enumeration.
      *
      * Must be hardware-enforced.
      */
-    EC_CURVE = (1 << 28) /* TagType:ENUM */ | 10,
+    EC_CURVE = TagType.ENUM | 10,
 
     /**
      * Tag::RSA_PUBLIC_EXPONENT specifies the value of the public exponent for an RSA key pair.
@@ -174,7 +169,7 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    RSA_PUBLIC_EXPONENT = (5 << 28) /* TagType:ULONG */ | 200,
+    RSA_PUBLIC_EXPONENT = TagType.ULONG | 200,
 
     // Tag 201 reserved
 
@@ -185,40 +180,22 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    INCLUDE_UNIQUE_ID = (7 << 28) /* TagType:BOOL */ | 202,
+    INCLUDE_UNIQUE_ID = TagType.BOOL | 202,
 
     /**
-     * Tag::RSA_OAEP_MGF_DIGEST specifies the MGF1 digest algorithms that may be used with
-     * RSA encryption/decryption with OAEP padding. If the key characteristics supports OAEP
-     * and this tag is absent then SHA1 digest is selected by default for MGF1.
+     * Tag::RSA_OAEP_MGF_DIGEST specifies the MGF1 digest algorithms that may be used with RSA
+     * encryption/decryption with OAEP padding.  Possible values are defined by the Digest enum.
      *
-     * This tag is repeatable for key generation/import.  If this tag is present in the key
-     * characteristics with one or more values from @4.0::Digest, then for RSA cipher
-     * operations with OAEP Padding, the caller must specify a digest in the additionalParams
-     * argument of begin operation. If this tag is missing or the specified digest is not in
-     * the digests associated with the key then begin operation must fail with
-     * ErrorCode::INCOMPATIBLE_MGF_DIGEST.
+     * This tag is repeatable for key generation/import.  RSA cipher operations with OAEP padding
+     * must specify an MGF1 digest in the params argument of begin(). If this tag is missing or the
+     * specified digest is not in the MGF1 digests associated with the key then begin operation must
+     * fail with ErrorCode::INCOMPATIBLE_MGF_DIGEST.
      *
      * Must be hardware-enforced.
      */
-    RSA_OAEP_MGF_DIGEST = (2 << 28) /* TagType:ENUM_REP */ | 203,
+    RSA_OAEP_MGF_DIGEST = TagType.ENUM_REP | 203,
 
-    /**
-     * TODO(seleneh) this tag needs to be deleted from all codes.
-     *
-     * Tag::BLOB_USAGE_REQUIREMENTS specifies the necessary system environment conditions for the
-     * generated key to be used.  Possible values are defined by the KeyBlobUsageRequirements enum.
-     *
-     * This tag is specified by the caller during key generation or import to require that the key
-     * is usable in the specified condition.  If the caller specifies Tag::BLOB_USAGE_REQUIREMENTS
-     * with value KeyBlobUsageRequirements::STANDALONE the IKeyMintDevice must return a key blob
-     * that can be used without file system support.  This is critical for devices with encrypted
-     * disks, where the file system may not be available until after a KeyMint key is used to
-     * decrypt the disk.
-     *
-     * Must be hardware-enforced.
-     */
-    BLOB_USAGE_REQUIREMENTS = (1 << 28) /* TagType:ENUM */ | 301,
+    // Tag 301 reserved
 
     /**
      * Tag::BOOTLOADER_ONLY specifies only the bootloader can use the key.
@@ -228,7 +205,7 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    BOOTLOADER_ONLY = (7 << 28) /* TagType:BOOL */ | 302,
+    BOOTLOADER_ONLY = TagType.BOOL | 302,
 
     /**
      * Tag::ROLLBACK_RESISTANCE specifies that the key has rollback resistance, meaning that when
@@ -241,21 +218,21 @@ enum Tag {
      * ErrorCode::ROLLBACK_RESISTANCE_UNAVAILABLE.  IKeyMintDevice implementations are not
      * required to support rollback resistance.
      *
-     * Must be hardwared-enforced.
+     * Must be hardware-enforced.
      */
-    ROLLBACK_RESISTANCE = (7 << 28) /* TagType:BOOL */ | 303,
+    ROLLBACK_RESISTANCE = TagType.BOOL | 303,
 
     // Reserved for future use.
-    HARDWARE_TYPE = (1 << 28) /* TagType:ENUM */ | 304,
+    HARDWARE_TYPE = TagType.ENUM | 304,
 
     /**
      * Keys tagged with EARLY_BOOT_ONLY may only be used during early boot, until
      * IKeyMintDevice::earlyBootEnded() is called.  Early boot keys may be created after
-     * early boot.  Early boot keys may not be imprted at all, if Tag::EARLY_BOOT_ONLY is
+     * early boot.  Early boot keys may not be imported at all, if Tag::EARLY_BOOT_ONLY is
      * provided to IKeyMintDevice::importKey, the import must fail with
-     * ErrorCode::INVALID_ARGUMENT.
+     * ErrorCode::EARLY_BOOT_ENDED.
      */
-    EARLY_BOOT_ONLY = (7 << 28) /* TagType:BOOL */ | 305,
+    EARLY_BOOT_ONLY = TagType.BOOL | 305,
 
     /**
      * Tag::ACTIVE_DATETIME specifies the date and time at which the key becomes active, in
@@ -264,7 +241,7 @@ enum Tag {
      *
      * Need not be hardware-enforced.
      */
-    ACTIVE_DATETIME = (6 << 28) /* TagType:DATE */ | 400,
+    ACTIVE_DATETIME = TagType.DATE | 400,
 
     /**
      * Tag::ORIGINATION_EXPIRE_DATETIME specifies the date and time at which the key expires for
@@ -276,7 +253,7 @@ enum Tag {
      *
      * Need not be hardware-enforced.
      */
-    ORIGINATION_EXPIRE_DATETIME = (6 << 28) /* TagType:DATE */ | 401,
+    ORIGINATION_EXPIRE_DATETIME = TagType.DATE | 401,
 
     /**
      * Tag::USAGE_EXPIRE_DATETIME specifies the date and time at which the key expires for
@@ -288,13 +265,9 @@ enum Tag {
      *
      * Need not be hardware-enforced.
      */
-    USAGE_EXPIRE_DATETIME = (6 << 28) /* TagType:DATE */ | 402,
+    USAGE_EXPIRE_DATETIME = TagType.DATE | 402,
 
     /**
-     * TODO(seleneh) this tag need to be deleted.
-     *
-     * TODO(seleneh) this tag need to be deleted.
-     *
      * Tag::MIN_SECONDS_BETWEEN_OPS specifies the minimum amount of time that elapses between
      * allowed operations using a key.  This can be used to rate-limit uses of keys in contexts
      * where unlimited use may enable brute force attacks.
@@ -307,13 +280,15 @@ enum Tag {
      * with ErrorCode::KEY_RATE_LIMIT_EXCEEDED.  This implies that the IKeyMintDevice must keep a
      * table of use counters for keys with this tag.  Because memory is often limited, this table
      * may have a fixed maximum size and KeyMint may fail operations that attempt to use keys with
-     * this tag when the table is full.  The table must acommodate at least 8 in-use keys and
+     * this tag when the table is full.  The table must accommodate at least 8 in-use keys and
      * aggressively reuse table slots when key minimum-usage intervals expire.  If an operation
      * fails because the table is full, KeyMint returns ErrorCode::TOO_MANY_OPERATIONS.
      *
      * Must be hardware-enforced.
+     *
+     * TODO(b/191458710): find out if this tag is still supported.
      */
-    MIN_SECONDS_BETWEEN_OPS = (3 << 28) /* TagType:UINT */ | 403,
+    MIN_SECONDS_BETWEEN_OPS = TagType.UINT | 403,
 
     /**
      * Tag::MAX_USES_PER_BOOT specifies the maximum number of times that a key may be used between
@@ -327,13 +302,13 @@ enum Tag {
      * device is restarted.  This implies that the IKeyMintDevice must keep a table of use
      * counters for keys with this tag.  Because KeyMint memory is often limited, this table can
      * have a fixed maximum size and KeyMint can fail operations that attempt to use keys with
-     * this tag when the table is full.  The table needs to acommodate at least 8 keys.  If an
+     * this tag when the table is full.  The table needs to accommodate at least 8 keys.  If an
      * operation fails because the table is full, IKeyMintDevice must
      * ErrorCode::TOO_MANY_OPERATIONS.
      *
      * Must be hardware-enforced.
      */
-    MAX_USES_PER_BOOT = (3 << 28) /* TagType:UINT */ | 404,
+    MAX_USES_PER_BOOT = TagType.UINT | 404,
 
     /**
      * Tag::USAGE_COUNT_LIMIT specifies the number of times that a key may be used. This can be
@@ -362,14 +337,14 @@ enum Tag {
      * record. This tag must have the same SecurityLevel as the tag that is added to the key
      * characteristics.
      */
-    USAGE_COUNT_LIMIT = (3 << 28) | 405, /* TagType:UINT */
+    USAGE_COUNT_LIMIT = TagType.UINT | 405,
 
     /**
      * Tag::USER_ID specifies the ID of the Android user that is permitted to use the key.
      *
      * Must not be hardware-enforced.
      */
-    USER_ID = (3 << 28) /* TagType:UINT */ | 501,
+    USER_ID = TagType.UINT | 501,
 
     /**
      * Tag::USER_SECURE_ID specifies that a key may only be used under a particular secure user
@@ -386,14 +361,14 @@ enum Tag {
      * key, and may only be used if the difference between the current time when begin() is called
      * and the timestamp in the HardwareAuthToken is less than the value in Tag::AUTH_TIMEOUT * 1000
      * (the multiplier is because Tag::AUTH_TIMEOUT is in seconds, but the HardwareAuthToken
-     * timestamp is in milliseconds).  Otherwise the IKeyMintDevice must returrn
+     * timestamp is in milliseconds).  Otherwise the IKeyMintDevice must return
      * ErrorCode::KEY_USER_NOT_AUTHENTICATED.
      *
      * If Tag::AUTH_TIMEOUT is not present, then the key is an "auth-per-operation" key.  In this
      * case, begin() must not require a HardwareAuthToken with appropriate contents.  Instead,
      * update() and finish() must receive a HardwareAuthToken with Tag::USER_SECURE_ID value in
      * userId or authenticatorId fields, and the current operation's operation handle in the
-     * challenge field.  Otherwise the IKeyMintDevice must returrn
+     * challenge field.  Otherwise the IKeyMintDevice must return
      * ErrorCode::KEY_USER_NOT_AUTHENTICATED.
      *
      * This tag is repeatable.  If repeated, and any one of the values matches the HardwareAuthToken
@@ -402,7 +377,7 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    USER_SECURE_ID = (10 << 28) /* TagType:ULONG_REP */ | 502,
+    USER_SECURE_ID = TagType.ULONG_REP | 502,
 
     /**
      * Tag::NO_AUTH_REQUIRED specifies that no authentication is required to use this key.  This tag
@@ -410,7 +385,7 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    NO_AUTH_REQUIRED = (7 << 28) /* TagType:BOOL */ | 503,
+    NO_AUTH_REQUIRED = TagType.BOOL | 503,
 
     /**
      * Tag::USER_AUTH_TYPE specifies the types of user authenticators that may be used to authorize
@@ -429,12 +404,12 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    USER_AUTH_TYPE = (1 << 28) /* TagType:ENUM */ | 504,
+    USER_AUTH_TYPE = TagType.ENUM | 504,
 
     /**
      * Tag::AUTH_TIMEOUT specifies the time in seconds for which the key is authorized for use,
      * after user authentication.  If
-     * Tag::USER_SECURE_ID is present and this tag is not, then the key requies authentication for
+     * Tag::USER_SECURE_ID is present and this tag is not, then the key requires authentication for
      * every usage (see begin() for the details of the authentication-per-operation flow).
      *
      * The value is a 32-bit integer specifying the time in seconds after a successful
@@ -443,7 +418,7 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    AUTH_TIMEOUT = (3 << 28) /* TagType:UINT */ | 505,
+    AUTH_TIMEOUT = TagType.UINT | 505,
 
     /**
      * Tag::ALLOW_WHILE_ON_BODY specifies that the key may be used after authentication timeout if
@@ -451,7 +426,7 @@ enum Tag {
      *
      * Cannot be hardware-enforced.
      */
-    ALLOW_WHILE_ON_BODY = (7 << 28) /* TagType:BOOL */ | 506,
+    ALLOW_WHILE_ON_BODY = TagType.BOOL | 506,
 
     /**
      * TRUSTED_USER_PRESENCE_REQUIRED is an optional feature that specifies that this key must be
@@ -498,13 +473,13 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    TRUSTED_USER_PRESENCE_REQUIRED = (7 << 28) /* TagType:BOOL */ | 507,
+    TRUSTED_USER_PRESENCE_REQUIRED = TagType.BOOL | 507,
 
     /**
      * Tag::TRUSTED_CONFIRMATION_REQUIRED is only applicable to keys with KeyPurpose SIGN, and
      *  specifies that this key must not be usable unless the user provides confirmation of the data
      *  to be signed.  Confirmation is proven to keyMint via an approval token.  See
-     *  CONFIRMATION_TOKEN, as well as the ConfirmatinUI HAL.
+     *  CONFIRMATION_TOKEN, as well as the ConfirmationUI HAL.
      *
      * If an attempt to use a key with this tag does not have a cryptographically valid
      * CONFIRMATION_TOKEN provided to finish() or if the data provided to update()/finish() does not
@@ -512,7 +487,7 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    TRUSTED_CONFIRMATION_REQUIRED = (7 << 28) /* TagType:BOOL */ | 508,
+    TRUSTED_CONFIRMATION_REQUIRED = TagType.BOOL | 508,
 
     /**
      * Tag::UNLOCKED_DEVICE_REQUIRED specifies that the key may only be used when the device is
@@ -520,13 +495,13 @@ enum Tag {
      *
      * Must be software-enforced.
      */
-    UNLOCKED_DEVICE_REQUIRED = (7 << 28) /* TagType:BOOL */ | 509,
+    UNLOCKED_DEVICE_REQUIRED = TagType.BOOL | 509,
 
     /**
      * Tag::APPLICATION_ID.  When provided to generateKey or importKey, this tag specifies data
      * that is necessary during all uses of the key.  In particular, calls to exportKey() and
      * getKeyCharacteristics() must provide the same value to the clientId parameter, and calls to
-     * begin must provide this tag and the same associated data as part of the inParams set.  If
+     * begin() must provide this tag and the same associated data as part of the inParams set.  If
      * the correct data is not provided, the method must return ErrorCode::INVALID_KEY_BLOB.
      *
      * The content of this tag must be bound to the key cryptographically, meaning it must not be
@@ -536,7 +511,7 @@ enum Tag {
      *
      * Must never appear in KeyCharacteristics.
      */
-    APPLICATION_ID = (9 << 28) /* TagType:BYTES */ | 601,
+    APPLICATION_ID = TagType.BYTES | 601,
 
     /*
      * Semantically unenforceable tags, either because they have no specific meaning or because
@@ -550,23 +525,22 @@ enum Tag {
      * provide this tag and the same associated data as part of the inParams set.  If the correct
      * data is not provided, the method must return ErrorCode::INVALID_KEY_BLOB.
      *
-     * The content of this tag msut be bound to the key cryptographically, meaning it must not be
+     * The content of this tag must be bound to the key cryptographically, meaning it must not be
      * possible for an adversary who has access to all of the secure world secrets but does not have
      * access to the tag content to decrypt the key without brute-forcing the tag content, which
      * applications can prevent by specifying sufficiently high-entropy content.
      *
      * Must never appear in KeyCharacteristics.
      */
-    APPLICATION_DATA = (9 << 28) /* TagType:BYTES */ | 700,
+    APPLICATION_DATA = TagType.BYTES | 700,
 
     /**
      * Tag::CREATION_DATETIME specifies the date and time the key was created, in milliseconds since
-     * January 1, 1970.  This tag is optional and informational only.
+     * January 1, 1970.  This tag is optional and informational only, and not enforced by anything.
      *
-     * Tag::CREATED is informational only, and not enforced by anything.  Must be in the
-     * software-enforced list, if provided.
+     * Must be in the software-enforced list, if provided.
      */
-    CREATION_DATETIME = (6 << 28) /* TagType:DATE */ | 701,
+    CREATION_DATETIME = TagType.DATE | 701,
 
     /**
      * Tag::ORIGIN specifies where the key was created, if known.  This tag must not be specified
@@ -575,7 +549,7 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    ORIGIN = (1 << 28) /* TagType:ENUM */ | 702,
+    ORIGIN = TagType.ENUM | 702,
 
     // 703 is unused.
 
@@ -587,7 +561,7 @@ enum Tag {
      *
      * Must never appear in KeyCharacteristics.
      */
-    ROOT_OF_TRUST = (9 << 28) /* TagType:BYTES */ | 704,
+    ROOT_OF_TRUST = TagType.BYTES | 704,
 
     /**
      * Tag::OS_VERSION specifies the system OS version with which the key may be used.  This tag is
@@ -610,7 +584,7 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    OS_VERSION = (3 << 28) /* TagType:UINT */ | 705,
+    OS_VERSION = TagType.UINT | 705,
 
     /**
      * Tag::OS_PATCHLEVEL specifies the system security patch level with which the key may be used.
@@ -631,7 +605,7 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    OS_PATCHLEVEL = (3 << 28) /* TagType:UINT */ | 706,
+    OS_PATCHLEVEL = TagType.UINT | 706,
 
     /**
      * Tag::UNIQUE_ID specifies a unique, time-based identifier.  This tag is never provided to or
@@ -650,10 +624,11 @@ enum Tag {
      *      Tag::CREATION_DATETIME by 2592000000, dropping any remainder.  T changes every 30 days
      *      (2592000000 = 30 * 24 * 60 * 60 * 1000).
      *
-     *    C is the value of Tag::ATTESTATION_APPLICATION_ID that is provided to attestKey().
+     *    C is the value of Tag::ATTESTATION_APPLICATION_ID that is provided to attested key
+     *      generation/import operations.
      *
-     *    R is 1 if Tag::RESET_SINCE_ID_ROTATION was provided to attestKey or 0 if the tag was not
-     *      provided.
+     *    R is 1 if Tag::RESET_SINCE_ID_ROTATION was provided to attested key generation/import or 0
+     *      if the tag was not provided.
      *
      *    HBK is a unique hardware-bound secret known to the secure environment and never revealed
      *    by it.  The secret must contain at least 128 bits of entropy and be unique to the
@@ -665,20 +640,20 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    UNIQUE_ID = (9 << 28) /* TagType:BYTES */ | 707,
+    UNIQUE_ID = TagType.BYTES | 707,
 
     /**
-     * Tag::ATTESTATION_CHALLENGE is used to deliver a "challenge" value to the attestKey() method,
-     * which must place the value in the KeyDescription SEQUENCE of the attestation extension.  See
-     * attestKey().
+     * Tag::ATTESTATION_CHALLENGE is used to deliver a "challenge" value to the attested key
+     * generation/import methods, which must place the value in the KeyDescription SEQUENCE of the
+     * attestation extension.
      *
      * Must never appear in KeyCharacteristics.
      */
-    ATTESTATION_CHALLENGE = (9 << 28) /* TagType:BYTES */ | 708,
+    ATTESTATION_CHALLENGE = TagType.BYTES | 708,
 
     /**
      * Tag::ATTESTATION_APPLICATION_ID identifies the set of applications which may use a key, used
-     * only with attestKey().
+     * only with attested key generation/import operations.
      *
      * The content of Tag::ATTESTATION_APPLICATION_ID is a DER-encoded ASN.1 structure, with the
      * following schema:
@@ -700,12 +675,12 @@ enum Tag {
      *
      * Cannot be hardware-enforced.
      */
-    ATTESTATION_APPLICATION_ID = (9 << 28) /* TagType:BYTES */ | 709,
+    ATTESTATION_APPLICATION_ID = TagType.BYTES | 709,
 
     /**
      * Tag::ATTESTATION_ID_BRAND provides the device's brand name, as returned by Build.BRAND in
-     * Android, to attestKey().  This field must be set only when requesting attestation of the
-     * device's identifiers.
+     * Android, to attested key generation/import operations.  This field must be set only when
+     * requesting attestation of the device's identifiers.
      *
      * If the device does not support ID attestation (or destroyAttestationIds() was previously
      * called and the device can no longer attest its IDs), any key attestation request that
@@ -713,12 +688,12 @@ enum Tag {
      *
      * Must never appear in KeyCharacteristics.
      */
-    ATTESTATION_ID_BRAND = (9 << 28) /* TagType:BYTES */ | 710,
+    ATTESTATION_ID_BRAND = TagType.BYTES | 710,
 
     /**
      * Tag::ATTESTATION_ID_DEVICE provides the device's device name, as returned by Build.DEVICE in
-     * Android, to attestKey().  This field must be set only when requesting attestation of the
-     * device's identifiers.
+     * Android, to attested key generation/import operations.  This field must be set only when
+     * requesting attestation of the device's identifiers.
      *
      * If the device does not support ID attestation (or destroyAttestationIds() was previously
      * called and the device can no longer attest its IDs), any key attestation request that
@@ -726,12 +701,12 @@ enum Tag {
      *
      * Must never appear in KeyCharacteristics.
      */
-    ATTESTATION_ID_DEVICE = (9 << 28) /* TagType:BYTES */ | 711,
+    ATTESTATION_ID_DEVICE = TagType.BYTES | 711,
 
     /**
      * Tag::ATTESTATION_ID_PRODUCT provides the device's product name, as returned by Build.PRODUCT
-     * in Android, to attestKey().  This field must be set only when requesting attestation of the
-     * device's identifiers.
+     * in Android, to attested key generation/import operations.  This field must be set only when
+     * requesting attestation of the device's identifiers.
      *
      * If the device does not support ID attestation (or destroyAttestationIds() was previously
      * called and the device can no longer attest its IDs), any key attestation request that
@@ -739,7 +714,7 @@ enum Tag {
      *
      * Must never appear in KeyCharacteristics.
      */
-    ATTESTATION_ID_PRODUCT = (9 << 28) /* TagType:BYTES */ | 712,
+    ATTESTATION_ID_PRODUCT = TagType.BYTES | 712,
 
     /**
      * Tag::ATTESTATION_ID_SERIAL the device's serial number.  This field must be set only when
@@ -751,48 +726,11 @@ enum Tag {
      *
      * Must never appear in KeyCharacteristics.
      */
-    ATTESTATION_ID_SERIAL = (9 << 28) /* TagType:BYTES */ | 713,
+    ATTESTATION_ID_SERIAL = TagType.BYTES | 713,
 
     /**
-     * Tag::ATTESTATION_ID_IMEI provides the IMEIs for all radios on the device to attestKey().
-     * This field must be set only when requesting attestation of the device's identifiers.
-     *
-     * If the device does not support ID attestation (or destroyAttestationIds() was previously
-     * called and the device can no longer attest its IDs), any key attestation request that
-     * includes this tag must fail with ErrorCode::CANNOT_ATTEST_IDS.
-     *
-     * Must never appear in KeyCharacteristics.
-     */
-    ATTESTATION_ID_IMEI = (9 << 28) /* TagType:BYTES */ | 714,
-
-    /**
-     * Tag::ATTESTATION_ID_MEID provides the MEIDs for all radios on the device to attestKey().
-     * This field must be set only when requesting attestation of the device's identifiers.
-     *
-     * If the device does not support ID attestation (or destroyAttestationIds() was previously
-     * called and the device can no longer attest its IDs), any key attestation request that
-     * includes this tag must fail with ErrorCode::CANNOT_ATTEST_IDS.
-     *
-     * Must never appear in KeyCharacteristics.
-     */
-    ATTESTATION_ID_MEID = (9 << 28) /* TagType:BYTES */ | 715,
-
-    /**
-     * Tag::ATTESTATION_ID_MANUFACTURER provides the device's manufacturer name, as returned by
-     * Build.MANUFACTURER in Android, to attstKey().  This field must be set only when requesting
-     * attestation of the device's identifiers.
-     *
-     * If the device does not support ID attestation (or destroyAttestationIds() was previously
-     * called and the device can no longer attest its IDs), any key attestation request that
-     * includes this tag must fail with ErrorCode::CANNOT_ATTEST_IDS.
-     *
-     * Must never appear in KeyCharacteristics.
-     */
-    ATTESTATION_ID_MANUFACTURER = (9 << 28) /* TagType:BYTES */ | 716,
-
-    /**
-     * Tag::ATTESTATION_ID_MODEL provides the device's model name, as returned by Build.MODEL in
-     * Android, to attestKey().  This field must be set only when requesting attestation of the
+     * Tag::ATTESTATION_ID_IMEI provides the IMEIs for all radios on the device to attested key
+     * generation/import operations.  This field must be set only when requesting attestation of the
      * device's identifiers.
      *
      * If the device does not support ID attestation (or destroyAttestationIds() was previously
@@ -801,7 +739,46 @@ enum Tag {
      *
      * Must never appear in KeyCharacteristics.
      */
-    ATTESTATION_ID_MODEL = (9 << 28) /* TagType:BYTES */ | 717,
+    ATTESTATION_ID_IMEI = TagType.BYTES | 714,
+
+    /**
+     * Tag::ATTESTATION_ID_MEID provides the MEIDs for all radios on the device to attested key
+     * generation/import operations.  This field must be set only when requesting attestation of the
+     * device's identifiers.
+     *
+     * If the device does not support ID attestation (or destroyAttestationIds() was previously
+     * called and the device can no longer attest its IDs), any key attestation request that
+     * includes this tag must fail with ErrorCode::CANNOT_ATTEST_IDS.
+     *
+     * Must never appear in KeyCharacteristics.
+     */
+    ATTESTATION_ID_MEID = TagType.BYTES | 715,
+
+    /**
+     * Tag::ATTESTATION_ID_MANUFACTURER provides the device's manufacturer name, as returned by
+     * Build.MANUFACTURER in Android, to attested key generation/import operations.  This field must
+     * be set only when requesting attestation of the device's identifiers.
+     *
+     * If the device does not support ID attestation (or destroyAttestationIds() was previously
+     * called and the device can no longer attest its IDs), any key attestation request that
+     * includes this tag must fail with ErrorCode::CANNOT_ATTEST_IDS.
+     *
+     * Must never appear in KeyCharacteristics.
+     */
+    ATTESTATION_ID_MANUFACTURER = TagType.BYTES | 716,
+
+    /**
+     * Tag::ATTESTATION_ID_MODEL provides the device's model name, as returned by Build.MODEL in
+     * Android, to attested key generation/import operations.  This field must be set only when
+     * requesting attestation of the device's identifiers.
+     *
+     * If the device does not support ID attestation (or destroyAttestationIds() was previously
+     * called and the device can no longer attest its IDs), any key attestation request that
+     * includes this tag must fail with ErrorCode::CANNOT_ATTEST_IDS.
+     *
+     * Must never appear in KeyCharacteristics.
+     */
+    ATTESTATION_ID_MODEL = TagType.BYTES | 717,
 
     /**
      * Tag::VENDOR_PATCHLEVEL specifies the vendor image security patch level with which the key may
@@ -823,7 +800,7 @@ enum Tag {
      *
      * Must be hardware-enforced.
      */
-    VENDOR_PATCHLEVEL = (3 << 28) /* TagType:UINT */ | 718,
+    VENDOR_PATCHLEVEL = TagType.UINT | 718,
 
     /**
      * Tag::BOOT_PATCHLEVEL specifies the boot image (kernel) security patch level with which the
@@ -839,27 +816,37 @@ enum Tag {
      * the value would be 20180605.  If the day is not known, 00 may be substituted.
      *
      * During each boot, the bootloader must provide the patch level of the boot image to the secure
-     * envirionment (mechanism is implementation-defined).
+     * environment (mechanism is implementation-defined).
      *
      * Must be hardware-enforced.
      */
-    BOOT_PATCHLEVEL = (3 << 28) /* TagType:UINT */ | 719,
+    BOOT_PATCHLEVEL = TagType.UINT | 719,
 
     /**
-     * DEVICE_UNIQUE_ATTESTATION is an argument to IKeyMintDevice::attestKey().  It indicates that
-     * attestation using a device-unique key is requested, rather than a batch key.  When a
-     * device-unique key is used, only the attestation certificate is returned; no additional
-     * chained certificates are provided.  It's up to the caller to recognize the device-unique
-     * signing key.  Only SecurityLevel::STRONGBOX IKeyMintDevices may support device-unique
-     * attestations.  SecurityLevel::TRUSTED_ENVIRONMENT IKeyMintDevices must return
-     * ErrorCode::INVALID_ARGUMENT if they receive DEVICE_UNIQUE_ATTESTATION.
+     * DEVICE_UNIQUE_ATTESTATION is an argument to IKeyMintDevice::attested key generation/import
+     * operations.  It indicates that attestation using a device-unique key is requested, rather
+     * than a batch key.  When a device-unique key is used, the returned chain should contain two
+     * certificates:
+     *    * The attestation certificate, containing the attestation extension, as described in
+            KeyCreationResult.aidl.
+     *    * A self-signed root certificate, signed by the device-unique key.
+     * No additional chained certificates are provided. Only SecurityLevel::STRONGBOX
+     * IKeyMintDevices may support device-unique attestations.  SecurityLevel::TRUSTED_ENVIRONMENT
+     * IKeyMintDevices must return ErrorCode::INVALID_ARGUMENT if they receive
+     * DEVICE_UNIQUE_ATTESTATION.
      * SecurityLevel::STRONGBOX IKeyMintDevices need not support DEVICE_UNIQUE_ATTESTATION, and
      * return ErrorCode::CANNOT_ATTEST_IDS if they do not support it.
+     *
+     * The caller needs to obtain the device-unique keys out-of-band and compare them against the
+     * key used to sign the self-signed root certificate.
+     * To ease this process, the IKeyMintDevice implementation should include, both in the subject
+     * and issuer fields of the self-signed root, the unique identifier of the device. Using the
+     * unique identifier will make it straightforward for the caller to link a device to its key.
      *
      * IKeyMintDevice implementations that support device-unique attestation MUST add the
      * DEVICE_UNIQUE_ATTESTATION tag to device-unique attestations.
      */
-    DEVICE_UNIQUE_ATTESTATION = (7 << 28) /* TagType:BOOL */ | 720,
+    DEVICE_UNIQUE_ATTESTATION = TagType.BOOL | 720,
 
     /**
      * IDENTITY_CREDENTIAL_KEY is never used by IKeyMintDevice, is not a valid argument to key
@@ -867,7 +854,7 @@ enum Tag {
      * attestation.  It is used in attestations produced by the IIdentityCredential HAL when that
      * HAL attests to Credential Keys.  IIdentityCredential produces KeyMint-style attestations.
      */
-    IDENTITY_CREDENTIAL_KEY = (7 << 28) /* TagType:BOOL */ | 721,
+    IDENTITY_CREDENTIAL_KEY = TagType.BOOL | 721,
 
     /**
      * To prevent keys from being compromised if an attacker acquires read access to system / kernel
@@ -884,12 +871,13 @@ enum Tag {
      * ErrorCode::INVALID_OPERATION is returned when a key with Tag::STORAGE_KEY is provided to
      * begin().
      */
-    STORAGE_KEY = (7 << 28) /* TagType:BOOL */ | 722,
+    STORAGE_KEY = TagType.BOOL | 722,
 
     /**
+     * OBSOLETE: Do not use. See IKeyMintOperation.updateAad instead.
      * TODO: Delete when keystore1 is deleted.
      */
-    ASSOCIATED_DATA = (9 << 28) /* TagType:BYTES */ | 1000,
+    ASSOCIATED_DATA = TagType.BYTES | 1000,
 
     /**
      * Tag::NONCE is used to provide or return a nonce or Initialization Vector (IV) for AES-GCM,
@@ -904,7 +892,7 @@ enum Tag {
      *
      * Must never appear in KeyCharacteristics.
      */
-    NONCE = (9 << 28) /* TagType:BYTES */ | 1001,
+    NONCE = TagType.BYTES | 1001,
 
     /**
      * Tag::MAC_LENGTH provides the requested length of a MAC or GCM authentication tag, in bits.
@@ -915,7 +903,7 @@ enum Tag {
      *
      * Must never appear in KeyCharacteristics.
      */
-    MAC_LENGTH = (3 << 28) /* TagType:UINT */ | 1003,
+    MAC_LENGTH = TagType.UINT | 1003,
 
     /**
      * Tag::RESET_SINCE_ID_ROTATION specifies whether the device has been factory reset since the
@@ -923,7 +911,7 @@ enum Tag {
      *
      * Must never appear in KeyCharacteristics.
      */
-    RESET_SINCE_ID_ROTATION = (7 << 28) /* TagType:BOOL */ | 1004,
+    RESET_SINCE_ID_ROTATION = TagType.BOOL | 1004,
 
     /**
      * Tag::CONFIRMATION_TOKEN is used to deliver a cryptographic token proving that the user
@@ -932,38 +920,39 @@ enum Tag {
      *
      * Must never appear in KeyCharacteristics.
      */
-    CONFIRMATION_TOKEN = (9 << 28) /* TagType:BYTES */ | 1005,
+    CONFIRMATION_TOKEN = TagType.BYTES | 1005,
 
     /**
-     * Tag::CERTIFICATE_SERIAL specifies the serial number to be assigned to the
-     * attestation certificate to be generated for the given key.  This parameter should only
-     * be passed to keyMint in the attestation parameters during generateKey() and importKey().
+     * Tag::CERTIFICATE_SERIAL specifies the serial number to be assigned to the attestation
+     * certificate to be generated for the given key.  This parameter should only be passed to
+     * keyMint in the attestation parameters during generateKey() and importKey().  If not provided,
+     * the serial shall default to 1.
      */
-    CERTIFICATE_SERIAL = (8 << 28) /* TagType:BIGNUM */ | 1006,
+    CERTIFICATE_SERIAL = TagType.BIGNUM | 1006,
 
     /**
-     * Tag::CERTIFICATE_SUBJECT the certificate subject. The value is a DER encoded X509 NAME.
-     * This value is used when generating a self signed certificates. This tag may be specified
+     * Tag::CERTIFICATE_SUBJECT the certificate subject.  The value is a DER encoded X509 NAME.
+     * This value is used when generating a self signed certificates.  This tag may be specified
      * during generateKey and importKey. If not provided the subject name shall default to
-     * <TODO default subject here>.
+     * CN="Android Keystore Key".
      */
-    CERTIFICATE_SUBJECT = (9 << 28) /* TagType:BYTES */ | 1007,
+    CERTIFICATE_SUBJECT = TagType.BYTES | 1007,
 
     /**
      * Tag::CERTIFICATE_NOT_BEFORE the beginning of the validity of the certificate in UNIX epoch
-     * time in seconds. This value is used when generating attestation or self signed certificates.
-     * ErrorCode::MISSING_NOT_BEFORE must be returned if this tag is not provided if this tag is
-     * not provided to generateKey or importKey.
+     * time in milliseconds.  This value is used when generating attestation or self signed
+     * certificates.  ErrorCode::MISSING_NOT_BEFORE must be returned if this tag is not provided if
+     * this tag is not provided to generateKey or importKey.
      */
-    CERTIFICATE_NOT_BEFORE = (6 << 28) /* TagType:DATE */ | 1008,
+    CERTIFICATE_NOT_BEFORE = TagType.DATE | 1008,
 
     /**
-     * Tag::CERTIFICATE_NOT_AFTER the end of the validity of the certificate in UNIX epoch
-     * time in seconds. This value is used when generating attestation or self signed certificates.
-     * ErrorCode::MISSING_NOT_AFTER must be returned if this tag is not provided to generateKey
-     * or importKey.
+     * Tag::CERTIFICATE_NOT_AFTER the end of the validity of the certificate in UNIX epoch time in
+     * milliseconds.  This value is used when generating attestation or self signed certificates.
+     * ErrorCode::MISSING_NOT_AFTER must be returned if this tag is not provided to generateKey or
+     * importKey.
      */
-    CERTIFICATE_NOT_AFTER = (6 << 28) /* TagType:DATE */ | 1009,
+    CERTIFICATE_NOT_AFTER = TagType.DATE | 1009,
 
     /**
      * Tag::MAX_BOOT_LEVEL specifies a maximum boot level at which a key should function.
@@ -974,5 +963,5 @@ enum Tag {
      *
      * Cannot be hardware enforced in this version.
      */
-    MAX_BOOT_LEVEL = (3 << 28) /* TagType:UINT */ | 1010,
+    MAX_BOOT_LEVEL = TagType.UINT | 1010,
 }

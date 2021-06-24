@@ -22,9 +22,13 @@
 
 #include <android-base/logging.h>
 #include <android/binder_manager.h>
+#include <cppbor_parse.h>
 #include <cutils/properties.h>
+#include <gmock/gmock.h>
 #include <openssl/mem.h>
+#include <remote_prov/remote_prov_utils.h>
 
+#include <keymaster/cppcose/cppcose.h>
 #include <keymint_support/attestation_record.h>
 #include <keymint_support/key_param_output.h>
 #include <keymint_support/keymint_utils.h>
@@ -32,6 +36,7 @@
 
 namespace aidl::android::hardware::security::keymint {
 
+using namespace cppcose;
 using namespace std::literals::chrono_literals;
 using std::endl;
 using std::optional;
@@ -39,6 +44,9 @@ using std::unique_ptr;
 using ::testing::AssertionFailure;
 using ::testing::AssertionResult;
 using ::testing::AssertionSuccess;
+using ::testing::ElementsAreArray;
+using ::testing::MatchesRegex;
+using ::testing::Not;
 
 ::std::ostream& operator<<(::std::ostream& os, const AuthorizationSet& set) {
     if (set.size() == 0)
@@ -53,6 +61,14 @@ using ::testing::AssertionSuccess;
 namespace test {
 
 namespace {
+
+// Invalid value for a patchlevel (which is of form YYYYMMDD).
+const uint32_t kInvalidPatchlevel = 99998877;
+
+// Overhead for PKCS#1 v1.5 signature padding of undigested messages.  Digested messages have
+// additional overhead, for the digest algorithmIdentifier required by PKCS#1.
+const size_t kPkcs1UndigestedSignaturePaddingOverhead = 11;
+
 typedef KeyMintAidlTestBase::KeyData KeyData;
 // Predicate for testing basic characteristics validity in generation or import.
 bool KeyCharacteristicsBasicallyValid(SecurityLevel secLevel,
@@ -113,9 +129,7 @@ char nibble2hex[16] = {'0', '1', '2', '3', '4', '5', '6', '7',
 // Attestations don't contain everything in key authorization lists, so we need to filter the key
 // lists to produce the lists that we expect to match the attestations.
 auto kTagsToFilter = {
-        Tag::BLOB_USAGE_REQUIREMENTS,  //
-        Tag::CREATION_DATETIME,        //
-        Tag::EC_CURVE,
+        Tag::CREATION_DATETIME,
         Tag::HARDWARE_TYPE,
         Tag::INCLUDE_UNIQUE_ID,
 };
@@ -130,6 +144,15 @@ AuthorizationSet filtered_tags(const AuthorizationSet& set) {
     return filtered;
 }
 
+// Remove any SecurityLevel::KEYSTORE entries from a list of key characteristics.
+void strip_keystore_tags(vector<KeyCharacteristics>* characteristics) {
+    characteristics->erase(std::remove_if(characteristics->begin(), characteristics->end(),
+                                          [](const auto& entry) {
+                                              return entry.securityLevel == SecurityLevel::KEYSTORE;
+                                          }),
+                           characteristics->end());
+}
+
 string x509NameToStr(X509_NAME* name) {
     char* s = X509_NAME_oneline(name, nullptr, 0);
     string retval(s);
@@ -141,6 +164,28 @@ string x509NameToStr(X509_NAME* name) {
 
 bool KeyMintAidlTestBase::arm_deleteAllKeys = false;
 bool KeyMintAidlTestBase::dump_Attestations = false;
+
+uint32_t KeyMintAidlTestBase::boot_patch_level(
+        const vector<KeyCharacteristics>& key_characteristics) {
+    // The boot patchlevel is not available as a property, but should be present
+    // in the key characteristics of any created key.
+    AuthorizationSet allAuths;
+    for (auto& entry : key_characteristics) {
+        allAuths.push_back(AuthorizationSet(entry.authorizations));
+    }
+    auto patchlevel = allAuths.GetTagValue(TAG_BOOT_PATCHLEVEL);
+    if (patchlevel.has_value()) {
+        return patchlevel.value();
+    } else {
+        // No boot patchlevel is available. Return a value that won't match anything
+        // and so will trigger test failures.
+        return kInvalidPatchlevel;
+    }
+}
+
+uint32_t KeyMintAidlTestBase::boot_patch_level() {
+    return boot_patch_level(key_characteristics_);
+}
 
 ErrorCode KeyMintAidlTestBase::GetReturnErrorCode(const Status& result) {
     if (result.isOk()) return ErrorCode::OK;
@@ -162,9 +207,11 @@ void KeyMintAidlTestBase::InitializeKeyMint(std::shared_ptr<IKeyMintDevice> keyM
     securityLevel_ = info.securityLevel;
     name_.assign(info.keyMintName.begin(), info.keyMintName.end());
     author_.assign(info.keyMintAuthorName.begin(), info.keyMintAuthorName.end());
+    timestamp_token_required_ = info.timestampTokenRequired;
 
     os_version_ = getOsVersion();
     os_patch_level_ = getOsPatchlevel();
+    vendor_patch_level_ = getVendorPatchlevel();
 }
 
 void KeyMintAidlTestBase::SetUp() {
@@ -267,7 +314,8 @@ ErrorCode KeyMintAidlTestBase::ImportKey(const AuthorizationSet& key_desc, KeyFo
 ErrorCode KeyMintAidlTestBase::ImportWrappedKey(string wrapped_key, string wrapping_key,
                                                 const AuthorizationSet& wrapping_key_desc,
                                                 string masking_key,
-                                                const AuthorizationSet& unwrapping_params) {
+                                                const AuthorizationSet& unwrapping_params,
+                                                int64_t password_sid, int64_t biometric_sid) {
     EXPECT_EQ(ErrorCode::OK, ImportKey(wrapping_key_desc, KeyFormat::PKCS8, wrapping_key));
 
     key_characteristics_.clear();
@@ -276,8 +324,7 @@ ErrorCode KeyMintAidlTestBase::ImportWrappedKey(string wrapped_key, string wrapp
     Status result = keymint_->importWrappedKey(
             vector<uint8_t>(wrapped_key.begin(), wrapped_key.end()), key_blob_,
             vector<uint8_t>(masking_key.begin(), masking_key.end()),
-            unwrapping_params.vector_data(), 0 /* passwordSid */, 0 /* biometricSid */,
-            &creationResult);
+            unwrapping_params.vector_data(), password_sid, biometric_sid, &creationResult);
 
     if (result.isOk()) {
         EXPECT_PRED2(KeyCharacteristicsBasicallyValid, SecLevel(),
@@ -306,6 +353,65 @@ ErrorCode KeyMintAidlTestBase::ImportWrappedKey(string wrapped_key, string wrapp
     return GetReturnErrorCode(result);
 }
 
+ErrorCode KeyMintAidlTestBase::GetCharacteristics(const vector<uint8_t>& key_blob,
+                                                  const vector<uint8_t>& app_id,
+                                                  const vector<uint8_t>& app_data,
+                                                  vector<KeyCharacteristics>* key_characteristics) {
+    Status result =
+            keymint_->getKeyCharacteristics(key_blob, app_id, app_data, key_characteristics);
+    return GetReturnErrorCode(result);
+}
+
+ErrorCode KeyMintAidlTestBase::GetCharacteristics(const vector<uint8_t>& key_blob,
+                                                  vector<KeyCharacteristics>* key_characteristics) {
+    vector<uint8_t> empty_app_id, empty_app_data;
+    return GetCharacteristics(key_blob, empty_app_id, empty_app_data, key_characteristics);
+}
+
+void KeyMintAidlTestBase::CheckCharacteristics(
+        const vector<uint8_t>& key_blob,
+        const vector<KeyCharacteristics>& generate_characteristics) {
+    // Any key characteristics that were in SecurityLevel::KEYSTORE when returned from
+    // generateKey() should be excluded, as KeyMint will have no record of them.
+    // This applies to CREATION_DATETIME in particular.
+    vector<KeyCharacteristics> expected_characteristics(generate_characteristics);
+    strip_keystore_tags(&expected_characteristics);
+
+    vector<KeyCharacteristics> retrieved;
+    ASSERT_EQ(ErrorCode::OK, GetCharacteristics(key_blob, &retrieved));
+    EXPECT_EQ(expected_characteristics, retrieved);
+}
+
+void KeyMintAidlTestBase::CheckAppIdCharacteristics(
+        const vector<uint8_t>& key_blob, std::string_view app_id_string,
+        std::string_view app_data_string,
+        const vector<KeyCharacteristics>& generate_characteristics) {
+    // Exclude any SecurityLevel::KEYSTORE characteristics for comparisons.
+    vector<KeyCharacteristics> expected_characteristics(generate_characteristics);
+    strip_keystore_tags(&expected_characteristics);
+
+    vector<uint8_t> app_id(app_id_string.begin(), app_id_string.end());
+    vector<uint8_t> app_data(app_data_string.begin(), app_data_string.end());
+    vector<KeyCharacteristics> retrieved;
+    ASSERT_EQ(ErrorCode::OK, GetCharacteristics(key_blob, app_id, app_data, &retrieved));
+    EXPECT_EQ(expected_characteristics, retrieved);
+
+    // Check that key characteristics can't be retrieved if the app ID or app data is missing.
+    vector<uint8_t> empty;
+    vector<KeyCharacteristics> not_retrieved;
+    EXPECT_EQ(ErrorCode::INVALID_KEY_BLOB,
+              GetCharacteristics(key_blob, empty, app_data, &not_retrieved));
+    EXPECT_EQ(not_retrieved.size(), 0);
+
+    EXPECT_EQ(ErrorCode::INVALID_KEY_BLOB,
+              GetCharacteristics(key_blob, app_id, empty, &not_retrieved));
+    EXPECT_EQ(not_retrieved.size(), 0);
+
+    EXPECT_EQ(ErrorCode::INVALID_KEY_BLOB,
+              GetCharacteristics(key_blob, empty, empty, &not_retrieved));
+    EXPECT_EQ(not_retrieved.size(), 0);
+}
+
 ErrorCode KeyMintAidlTestBase::DeleteKey(vector<uint8_t>* key_blob, bool keep_key_blob) {
     Status result = keymint_->deleteKey(*key_blob);
     if (!keep_key_blob) {
@@ -326,6 +432,11 @@ ErrorCode KeyMintAidlTestBase::DeleteAllKeys() {
     return GetReturnErrorCode(result);
 }
 
+ErrorCode KeyMintAidlTestBase::DestroyAttestationIds() {
+    Status result = keymint_->destroyAttestationIds();
+    return GetReturnErrorCode(result);
+}
+
 void KeyMintAidlTestBase::CheckedDeleteKey(vector<uint8_t>* key_blob, bool keep_key_blob) {
     ErrorCode result = DeleteKey(key_blob, keep_key_blob);
     EXPECT_TRUE(result == ErrorCode::OK || result == ErrorCode::UNIMPLEMENTED) << result << endl;
@@ -342,7 +453,7 @@ ErrorCode KeyMintAidlTestBase::Begin(KeyPurpose purpose, const vector<uint8_t>& 
     SCOPED_TRACE("Begin");
     Status result;
     BeginResult out;
-    result = keymint_->begin(purpose, key_blob, in_params.vector_data(), HardwareAuthToken(), &out);
+    result = keymint_->begin(purpose, key_blob, in_params.vector_data(), std::nullopt, &out);
 
     if (result.isOk()) {
         *out_params = out.params;
@@ -360,7 +471,7 @@ ErrorCode KeyMintAidlTestBase::Begin(KeyPurpose purpose, const vector<uint8_t>& 
     Status result;
     BeginResult out;
 
-    result = keymint_->begin(purpose, key_blob, in_params.vector_data(), HardwareAuthToken(), &out);
+    result = keymint_->begin(purpose, key_blob, in_params.vector_data(), std::nullopt, &out);
 
     if (result.isOk()) {
         *out_params = out.params;
@@ -578,6 +689,205 @@ void KeyMintAidlTestBase::VerifyMessage(const string& message, const string& sig
     VerifyMessage(key_blob_, message, signature, params);
 }
 
+void KeyMintAidlTestBase::LocalVerifyMessage(const string& message, const string& signature,
+                                             const AuthorizationSet& params) {
+    SCOPED_TRACE("LocalVerifyMessage");
+
+    // Retrieve the public key from the leaf certificate.
+    ASSERT_GT(cert_chain_.size(), 0);
+    X509_Ptr key_cert(parse_cert_blob(cert_chain_[0].encodedCertificate));
+    ASSERT_TRUE(key_cert.get());
+    EVP_PKEY_Ptr pub_key(X509_get_pubkey(key_cert.get()));
+    ASSERT_TRUE(pub_key.get());
+
+    Digest digest = params.GetTagValue(TAG_DIGEST).value();
+    PaddingMode padding = PaddingMode::NONE;
+    auto tag = params.GetTagValue(TAG_PADDING);
+    if (tag.has_value()) {
+        padding = tag.value();
+    }
+
+    if (digest == Digest::NONE) {
+        switch (EVP_PKEY_id(pub_key.get())) {
+            case EVP_PKEY_EC: {
+                vector<uint8_t> data((EVP_PKEY_bits(pub_key.get()) + 7) / 8);
+                size_t data_size = std::min(data.size(), message.size());
+                memcpy(data.data(), message.data(), data_size);
+                EC_KEY_Ptr ecdsa(EVP_PKEY_get1_EC_KEY(pub_key.get()));
+                ASSERT_TRUE(ecdsa.get());
+                ASSERT_EQ(1,
+                          ECDSA_verify(0, reinterpret_cast<const uint8_t*>(data.data()), data_size,
+                                       reinterpret_cast<const uint8_t*>(signature.data()),
+                                       signature.size(), ecdsa.get()));
+                break;
+            }
+            case EVP_PKEY_RSA: {
+                vector<uint8_t> data(EVP_PKEY_size(pub_key.get()));
+                size_t data_size = std::min(data.size(), message.size());
+                memcpy(data.data(), message.data(), data_size);
+
+                RSA_Ptr rsa(EVP_PKEY_get1_RSA(const_cast<EVP_PKEY*>(pub_key.get())));
+                ASSERT_TRUE(rsa.get());
+
+                size_t key_len = RSA_size(rsa.get());
+                int openssl_padding = RSA_NO_PADDING;
+                switch (padding) {
+                    case PaddingMode::NONE:
+                        ASSERT_TRUE(data_size <= key_len);
+                        ASSERT_EQ(key_len, signature.size());
+                        openssl_padding = RSA_NO_PADDING;
+                        break;
+                    case PaddingMode::RSA_PKCS1_1_5_SIGN:
+                        ASSERT_TRUE(data_size + kPkcs1UndigestedSignaturePaddingOverhead <=
+                                    key_len);
+                        openssl_padding = RSA_PKCS1_PADDING;
+                        break;
+                    default:
+                        ADD_FAILURE() << "Unsupported RSA padding mode " << padding;
+                }
+
+                vector<uint8_t> decrypted_data(key_len);
+                int bytes_decrypted = RSA_public_decrypt(
+                        signature.size(), reinterpret_cast<const uint8_t*>(signature.data()),
+                        decrypted_data.data(), rsa.get(), openssl_padding);
+                ASSERT_GE(bytes_decrypted, 0);
+
+                const uint8_t* compare_pos = decrypted_data.data();
+                size_t bytes_to_compare = bytes_decrypted;
+                uint8_t zero_check_result = 0;
+                if (padding == PaddingMode::NONE && data_size < bytes_to_compare) {
+                    // If the data is short, for "unpadded" signing we zero-pad to the left.  So
+                    // during verification we should have zeros on the left of the decrypted data.
+                    // Do a constant-time check.
+                    const uint8_t* zero_end = compare_pos + bytes_to_compare - data_size;
+                    while (compare_pos < zero_end) zero_check_result |= *compare_pos++;
+                    ASSERT_EQ(0, zero_check_result);
+                    bytes_to_compare = data_size;
+                }
+                ASSERT_EQ(0, memcmp(compare_pos, data.data(), bytes_to_compare));
+                break;
+            }
+            default:
+                ADD_FAILURE() << "Unknown public key type";
+        }
+    } else {
+        EVP_MD_CTX digest_ctx;
+        EVP_MD_CTX_init(&digest_ctx);
+        EVP_PKEY_CTX* pkey_ctx;
+        const EVP_MD* md = openssl_digest(digest);
+        ASSERT_NE(md, nullptr);
+        ASSERT_EQ(1, EVP_DigestVerifyInit(&digest_ctx, &pkey_ctx, md, nullptr, pub_key.get()));
+
+        if (padding == PaddingMode::RSA_PSS) {
+            EXPECT_GT(EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_PKCS1_PSS_PADDING), 0);
+            EXPECT_GT(EVP_PKEY_CTX_set_rsa_pss_saltlen(pkey_ctx, EVP_MD_size(md)), 0);
+        }
+
+        ASSERT_EQ(1, EVP_DigestVerifyUpdate(&digest_ctx,
+                                            reinterpret_cast<const uint8_t*>(message.data()),
+                                            message.size()));
+        ASSERT_EQ(1, EVP_DigestVerifyFinal(&digest_ctx,
+                                           reinterpret_cast<const uint8_t*>(signature.data()),
+                                           signature.size()));
+        EVP_MD_CTX_cleanup(&digest_ctx);
+    }
+}
+
+string KeyMintAidlTestBase::LocalRsaEncryptMessage(const string& message,
+                                                   const AuthorizationSet& params) {
+    SCOPED_TRACE("LocalRsaEncryptMessage");
+
+    // Retrieve the public key from the leaf certificate.
+    if (cert_chain_.empty()) {
+        ADD_FAILURE() << "No public key available";
+        return "Failure";
+    }
+    X509_Ptr key_cert(parse_cert_blob(cert_chain_[0].encodedCertificate));
+    EVP_PKEY_Ptr pub_key(X509_get_pubkey(key_cert.get()));
+    RSA_Ptr rsa(EVP_PKEY_get1_RSA(const_cast<EVP_PKEY*>(pub_key.get())));
+
+    // Retrieve relevant tags.
+    Digest digest = Digest::NONE;
+    Digest mgf_digest = Digest::NONE;
+    PaddingMode padding = PaddingMode::NONE;
+
+    auto digest_tag = params.GetTagValue(TAG_DIGEST);
+    if (digest_tag.has_value()) digest = digest_tag.value();
+    auto pad_tag = params.GetTagValue(TAG_PADDING);
+    if (pad_tag.has_value()) padding = pad_tag.value();
+    auto mgf_tag = params.GetTagValue(TAG_RSA_OAEP_MGF_DIGEST);
+    if (mgf_tag.has_value()) mgf_digest = mgf_tag.value();
+
+    const EVP_MD* md = openssl_digest(digest);
+    const EVP_MD* mgf_md = openssl_digest(mgf_digest);
+
+    // Set up encryption context.
+    EVP_PKEY_CTX_Ptr ctx(EVP_PKEY_CTX_new(pub_key.get(), /* engine= */ nullptr));
+    if (EVP_PKEY_encrypt_init(ctx.get()) <= 0) {
+        ADD_FAILURE() << "Encryption init failed: " << ERR_peek_last_error();
+        return "Failure";
+    }
+
+    int rc = -1;
+    switch (padding) {
+        case PaddingMode::NONE:
+            rc = EVP_PKEY_CTX_set_rsa_padding(ctx.get(), RSA_NO_PADDING);
+            break;
+        case PaddingMode::RSA_PKCS1_1_5_ENCRYPT:
+            rc = EVP_PKEY_CTX_set_rsa_padding(ctx.get(), RSA_PKCS1_PADDING);
+            break;
+        case PaddingMode::RSA_OAEP:
+            rc = EVP_PKEY_CTX_set_rsa_padding(ctx.get(), RSA_PKCS1_OAEP_PADDING);
+            break;
+        default:
+            break;
+    }
+    if (rc <= 0) {
+        ADD_FAILURE() << "Set padding failed: " << ERR_peek_last_error();
+        return "Failure";
+    }
+    if (padding == PaddingMode::RSA_OAEP) {
+        if (!EVP_PKEY_CTX_set_rsa_oaep_md(ctx.get(), md)) {
+            ADD_FAILURE() << "Set digest failed: " << ERR_peek_last_error();
+            return "Failure";
+        }
+        if (!EVP_PKEY_CTX_set_rsa_mgf1_md(ctx.get(), mgf_md)) {
+            ADD_FAILURE() << "Set MGF digest failed: " << ERR_peek_last_error();
+            return "Failure";
+        }
+    }
+
+    // Determine output size.
+    size_t outlen;
+    if (EVP_PKEY_encrypt(ctx.get(), nullptr /* out */, &outlen,
+                         reinterpret_cast<const uint8_t*>(message.data()), message.size()) <= 0) {
+        ADD_FAILURE() << "Determine output size failed: " << ERR_peek_last_error();
+        return "Failure";
+    }
+
+    // Left-zero-pad the input if necessary.
+    const uint8_t* to_encrypt = reinterpret_cast<const uint8_t*>(message.data());
+    size_t to_encrypt_len = message.size();
+
+    std::unique_ptr<string> zero_padded_message;
+    if (padding == PaddingMode::NONE && to_encrypt_len < outlen) {
+        zero_padded_message.reset(new string(outlen, '\0'));
+        memcpy(zero_padded_message->data() + (outlen - to_encrypt_len), message.data(),
+               message.size());
+        to_encrypt = reinterpret_cast<const uint8_t*>(zero_padded_message->data());
+        to_encrypt_len = outlen;
+    }
+
+    // Do the encryption.
+    string output(outlen, '\0');
+    if (EVP_PKEY_encrypt(ctx.get(), reinterpret_cast<uint8_t*>(output.data()), &outlen, to_encrypt,
+                         to_encrypt_len) <= 0) {
+        ADD_FAILURE() << "Encryption failed: " << ERR_peek_last_error();
+        return "Failure";
+    }
+    return output;
+}
+
 string KeyMintAidlTestBase::EncryptMessage(const vector<uint8_t>& key_blob, const string& message,
                                            const AuthorizationSet& in_params,
                                            AuthorizationSet* out_params) {
@@ -648,6 +958,18 @@ string KeyMintAidlTestBase::EncryptMessage(const string& message, BlockMode bloc
     return ciphertext;
 }
 
+string KeyMintAidlTestBase::EncryptMessage(const string& message, BlockMode block_mode,
+                                           PaddingMode padding, uint8_t mac_length_bits) {
+    SCOPED_TRACE("EncryptMessage");
+    auto params = AuthorizationSetBuilder()
+                          .BlockMode(block_mode)
+                          .Padding(padding)
+                          .Authorization(TAG_MAC_LENGTH, mac_length_bits);
+    AuthorizationSet out_params;
+    string ciphertext = EncryptMessage(message, params, &out_params);
+    return ciphertext;
+}
+
 string KeyMintAidlTestBase::DecryptMessage(const vector<uint8_t>& key_blob,
                                            const string& ciphertext,
                                            const AuthorizationSet& params) {
@@ -700,16 +1022,7 @@ vector<uint32_t> KeyMintAidlTestBase::ValidKeySizes(Algorithm algorithm) {
             }
             break;
         case Algorithm::EC:
-            switch (SecLevel()) {
-                case SecurityLevel::SOFTWARE:
-                case SecurityLevel::TRUSTED_ENVIRONMENT:
-                    return {224, 256, 384, 521};
-                case SecurityLevel::STRONGBOX:
-                    return {256};
-                default:
-                    ADD_FAILURE() << "Invalid security level " << uint32_t(SecLevel());
-                    break;
-            }
+            ADD_FAILURE() << "EC keys must be specified by curve not size";
             break;
         case Algorithm::AES:
             return {128, 256};
@@ -738,11 +1051,82 @@ vector<uint32_t> KeyMintAidlTestBase::InvalidKeySizes(Algorithm algorithm) {
                 return {224, 384, 521};
             case Algorithm::AES:
                 return {192};
+            case Algorithm::TRIPLE_DES:
+                return {56};
+            default:
+                return {};
+        }
+    } else {
+        switch (algorithm) {
+            case Algorithm::TRIPLE_DES:
+                return {56};
             default:
                 return {};
         }
     }
     return {};
+}
+
+vector<BlockMode> KeyMintAidlTestBase::ValidBlockModes(Algorithm algorithm) {
+    switch (algorithm) {
+        case Algorithm::AES:
+            return {
+                    BlockMode::CBC,
+                    BlockMode::CTR,
+                    BlockMode::ECB,
+                    BlockMode::GCM,
+            };
+        case Algorithm::TRIPLE_DES:
+            return {
+                    BlockMode::CBC,
+                    BlockMode::ECB,
+            };
+        default:
+            return {};
+    }
+}
+
+vector<PaddingMode> KeyMintAidlTestBase::ValidPaddingModes(Algorithm algorithm,
+                                                           BlockMode blockMode) {
+    switch (algorithm) {
+        case Algorithm::AES:
+            switch (blockMode) {
+                case BlockMode::CBC:
+                case BlockMode::ECB:
+                    return {PaddingMode::NONE, PaddingMode::PKCS7};
+                case BlockMode::CTR:
+                case BlockMode::GCM:
+                    return {PaddingMode::NONE};
+                default:
+                    return {};
+            };
+        case Algorithm::TRIPLE_DES:
+            switch (blockMode) {
+                case BlockMode::CBC:
+                case BlockMode::ECB:
+                    return {PaddingMode::NONE, PaddingMode::PKCS7};
+                default:
+                    return {};
+            };
+        default:
+            return {};
+    }
+}
+
+vector<PaddingMode> KeyMintAidlTestBase::InvalidPaddingModes(Algorithm algorithm,
+                                                             BlockMode blockMode) {
+    switch (algorithm) {
+        case Algorithm::AES:
+            switch (blockMode) {
+                case BlockMode::CTR:
+                case BlockMode::GCM:
+                    return {PaddingMode::PKCS7};
+                default:
+                    return {};
+            };
+        default:
+            return {};
+    }
 }
 
 vector<EcCurve> KeyMintAidlTestBase::ValidCurves() {
@@ -754,9 +1138,11 @@ vector<EcCurve> KeyMintAidlTestBase::ValidCurves() {
 }
 
 vector<EcCurve> KeyMintAidlTestBase::InvalidCurves() {
-    if (SecLevel() == SecurityLevel::TRUSTED_ENVIRONMENT) return {};
-    CHECK(SecLevel() == SecurityLevel::STRONGBOX);
-    return {EcCurve::P_224, EcCurve::P_384, EcCurve::P_521};
+    if (SecLevel() == SecurityLevel::STRONGBOX) {
+        return {EcCurve::P_224, EcCurve::P_384, EcCurve::P_521};
+    } else {
+        return {};
+    }
 }
 
 vector<Digest> KeyMintAidlTestBase::ValidDigests(bool withNone, bool withMD5) {
@@ -839,6 +1225,74 @@ ErrorCode KeyMintAidlTestBase::UseEcdsaKey(const vector<uint8_t>& ecdsaKeyBlob) 
     return result;
 }
 
+void verify_serial(X509* cert, const uint64_t expected_serial) {
+    BIGNUM_Ptr ser(BN_new());
+    EXPECT_TRUE(ASN1_INTEGER_to_BN(X509_get_serialNumber(cert), ser.get()));
+
+    uint64_t serial;
+    EXPECT_TRUE(BN_get_u64(ser.get(), &serial));
+    EXPECT_EQ(serial, expected_serial);
+}
+
+// Please set self_signed to true for fake certificates or self signed
+// certificates
+void verify_subject(const X509* cert,       //
+                    const string& subject,  //
+                    bool self_signed) {
+    char* cert_issuer =  //
+            X509_NAME_oneline(X509_get_issuer_name(cert), nullptr, 0);
+
+    char* cert_subj = X509_NAME_oneline(X509_get_subject_name(cert), nullptr, 0);
+
+    string expected_subject("/CN=");
+    if (subject.empty()) {
+        expected_subject.append("Android Keystore Key");
+    } else {
+        expected_subject.append(subject);
+    }
+
+    EXPECT_STREQ(expected_subject.c_str(), cert_subj) << "Cert has wrong subject." << cert_subj;
+
+    if (self_signed) {
+        EXPECT_STREQ(cert_issuer, cert_subj)
+                << "Cert issuer and subject mismatch for self signed certificate.";
+    }
+
+    OPENSSL_free(cert_subj);
+    OPENSSL_free(cert_issuer);
+}
+
+vector<uint8_t> build_serial_blob(const uint64_t serial_int) {
+    BIGNUM_Ptr serial(BN_new());
+    EXPECT_TRUE(BN_set_u64(serial.get(), serial_int));
+
+    int len = BN_num_bytes(serial.get());
+    vector<uint8_t> serial_blob(len);
+    if (BN_bn2bin(serial.get(), serial_blob.data()) != len) {
+        return {};
+    }
+
+    if (serial_blob.empty() || serial_blob[0] & 0x80) {
+        // An empty blob is OpenSSL's encoding of the zero value; we need single zero byte.
+        // Top bit being set indicates a negative number in two's complement, but our input
+        // was positive.
+        // In either case, prepend a zero byte.
+        serial_blob.insert(serial_blob.begin(), 0x00);
+    }
+
+    return serial_blob;
+}
+
+void verify_subject_and_serial(const Certificate& certificate,  //
+                               const uint64_t expected_serial,  //
+                               const string& subject, bool self_signed) {
+    X509_Ptr cert(parse_cert_blob(certificate.encodedCertificate));
+    ASSERT_TRUE(!!cert.get());
+
+    verify_serial(cert.get(), expected_serial);
+    verify_subject(cert.get(), subject, self_signed);
+}
+
 bool verify_attestation_record(const string& challenge,                //
                                const string& app_id,                   //
                                AuthorizationSet expected_sw_enforced,  //
@@ -856,9 +1310,9 @@ bool verify_attestation_record(const string& challenge,                //
     AuthorizationSet att_sw_enforced;
     AuthorizationSet att_hw_enforced;
     uint32_t att_attestation_version;
-    uint32_t att_keymaster_version;
+    uint32_t att_keymint_version;
     SecurityLevel att_attestation_security_level;
-    SecurityLevel att_keymaster_security_level;
+    SecurityLevel att_keymint_security_level;
     vector<uint8_t> att_challenge;
     vector<uint8_t> att_unique_id;
     vector<uint8_t> att_app_id;
@@ -867,8 +1321,8 @@ bool verify_attestation_record(const string& challenge,                //
                                           attest_rec->length,               //
                                           &att_attestation_version,         //
                                           &att_attestation_security_level,  //
-                                          &att_keymaster_version,           //
-                                          &att_keymaster_security_level,    //
+                                          &att_keymint_version,             //
+                                          &att_keymint_security_level,      //
                                           &att_challenge,                   //
                                           &att_sw_enforced,                 //
                                           &att_hw_enforced,                 //
@@ -876,28 +1330,32 @@ bool verify_attestation_record(const string& challenge,                //
     EXPECT_EQ(ErrorCode::OK, error);
     if (error != ErrorCode::OK) return false;
 
-    EXPECT_GE(att_attestation_version, 3U);
+    EXPECT_EQ(att_attestation_version, 100U);
+    vector<uint8_t> appId(app_id.begin(), app_id.end());
 
-    expected_sw_enforced.push_back(TAG_ATTESTATION_APPLICATION_ID,
-                                   vector<uint8_t>(app_id.begin(), app_id.end()));
+    // check challenge and app id only if we expects a non-fake certificate
+    if (challenge.length() > 0) {
+        EXPECT_EQ(challenge.length(), att_challenge.size());
+        EXPECT_EQ(0, memcmp(challenge.data(), att_challenge.data(), challenge.length()));
 
-    EXPECT_GE(att_keymaster_version, 4U);
-    EXPECT_EQ(security_level, att_keymaster_security_level);
+        expected_sw_enforced.push_back(TAG_ATTESTATION_APPLICATION_ID, appId);
+    }
+
+    EXPECT_EQ(att_keymint_version, 100U);
+    EXPECT_EQ(security_level, att_keymint_security_level);
     EXPECT_EQ(security_level, att_attestation_security_level);
 
-    EXPECT_EQ(challenge.length(), att_challenge.size());
-    EXPECT_EQ(0, memcmp(challenge.data(), att_challenge.data(), challenge.length()));
 
     char property_value[PROPERTY_VALUE_MAX] = {};
     // TODO(b/136282179): When running under VTS-on-GSI the TEE-backed
-    // keymaster implementation will report YYYYMM dates instead of YYYYMMDD
+    // keymint implementation will report YYYYMM dates instead of YYYYMMDD
     // for the BOOT_PATCH_LEVEL.
     if (avb_verification_enabled()) {
         for (int i = 0; i < att_hw_enforced.size(); i++) {
             if (att_hw_enforced[i].tag == TAG_BOOT_PATCHLEVEL ||
                 att_hw_enforced[i].tag == TAG_VENDOR_PATCHLEVEL) {
                 std::string date =
-                        std::to_string(att_hw_enforced[i].value.get<KeyParameterValue::dateTime>());
+                        std::to_string(att_hw_enforced[i].value.get<KeyParameterValue::integer>());
                 // strptime seems to require delimiters, but the tag value will
                 // be YYYYMMDD
                 date.insert(6, "-");
@@ -928,13 +1386,6 @@ bool verify_attestation_record(const string& challenge,                //
     } else {
         EXPECT_TRUE(expected_hw_enforced.Contains(TAG_NO_AUTH_REQUIRED));
     }
-
-    // Alternatively this checks the opposite - a false boolean tag (one that isn't provided in
-    // the authorization list during key generation) isn't being attested to in the certificate.
-    EXPECT_FALSE(expected_sw_enforced.Contains(TAG_TRUSTED_USER_PRESENCE_REQUIRED));
-    EXPECT_FALSE(att_sw_enforced.Contains(TAG_TRUSTED_USER_PRESENCE_REQUIRED));
-    EXPECT_FALSE(expected_hw_enforced.Contains(TAG_TRUSTED_USER_PRESENCE_REQUIRED));
-    EXPECT_FALSE(att_hw_enforced.Contains(TAG_TRUSTED_USER_PRESENCE_REQUIRED));
 
     if (att_hw_enforced.Contains(TAG_ALGORITHM, Algorithm::EC)) {
         // For ECDSA keys, either an EC_CURVE or a KEY_SIZE can be specified, but one must be.
@@ -1001,9 +1452,7 @@ bool verify_attestation_record(const string& challenge,                //
 
     att_sw_enforced.Sort();
     expected_sw_enforced.Sort();
-    auto a = filtered_tags(expected_sw_enforced);
-    auto b = filtered_tags(att_sw_enforced);
-    EXPECT_EQ(a, b);
+    EXPECT_EQ(filtered_tags(expected_sw_enforced), filtered_tags(att_sw_enforced));
 
     att_hw_enforced.Sort();
     expected_hw_enforced.Sort();
@@ -1072,17 +1521,10 @@ AssertionResult ChainSignaturesAreValid(const vector<Certificate>& chain) {
         string cert_issuer = x509NameToStr(X509_get_issuer_name(key_cert.get()));
         string signer_subj = x509NameToStr(X509_get_subject_name(signing_cert.get()));
         if (cert_issuer != signer_subj) {
-            return AssertionFailure() << "Cert " << i << " has wrong issuer.\n" << cert_data.str();
-        }
-
-        if (i == 0) {
-            string cert_sub = x509NameToStr(X509_get_subject_name(key_cert.get()));
-            if ("/CN=Android Keystore Key" != cert_sub) {
-                return AssertionFailure()
-                       << "Leaf cert has wrong subject, should be CN=Android Keystore Key, was "
-                       << cert_sub << '\n'
-                       << cert_data.str();
-            }
+            return AssertionFailure() << "Cert " << i << " has wrong issuer.\n"
+                                      << " Signer subject is " << signer_subj
+                                      << " Issuer subject is " << cert_issuer << endl
+                                      << cert_data.str();
         }
     }
 
@@ -1116,6 +1558,124 @@ vector<uint8_t> make_name_from_str(const string& name) {
     i2d_X509_NAME(x509_name.get(), &p);
 
     return retval;
+}
+
+namespace {
+
+void check_cose_key(const vector<uint8_t>& data, bool testMode) {
+    auto [parsedPayload, __, payloadParseErr] = cppbor::parse(data);
+    ASSERT_TRUE(parsedPayload) << "Key parse failed: " << payloadParseErr;
+
+    // The following check assumes that canonical CBOR encoding is used for the COSE_Key.
+    if (testMode) {
+        EXPECT_THAT(cppbor::prettyPrint(parsedPayload.get()),
+                    MatchesRegex("{\n"
+                                 "  1 : 2,\n"   // kty: EC2
+                                 "  3 : -7,\n"  // alg: ES256
+                                 "  -1 : 1,\n"  // EC id: P256
+                                 // The regex {(0x[0-9a-f]{2}, ){31}0x[0-9a-f]{2}} matches a
+                                 // sequence of 32 hexadecimal bytes, enclosed in braces and
+                                 // separated by commas. In this case, some Ed25519 public key.
+                                 "  -2 : {(0x[0-9a-f]{2}, ){31}0x[0-9a-f]{2}},\n"  // pub_x: data
+                                 "  -3 : {(0x[0-9a-f]{2}, ){31}0x[0-9a-f]{2}},\n"  // pub_y: data
+                                 "  -70000 : null,\n"                              // test marker
+                                 "}"));
+    } else {
+        EXPECT_THAT(cppbor::prettyPrint(parsedPayload.get()),
+                    MatchesRegex("{\n"
+                                 "  1 : 2,\n"   // kty: EC2
+                                 "  3 : -7,\n"  // alg: ES256
+                                 "  -1 : 1,\n"  // EC id: P256
+                                 // The regex {(0x[0-9a-f]{2}, ){31}0x[0-9a-f]{2}} matches a
+                                 // sequence of 32 hexadecimal bytes, enclosed in braces and
+                                 // separated by commas. In this case, some Ed25519 public key.
+                                 "  -2 : {(0x[0-9a-f]{2}, ){31}0x[0-9a-f]{2}},\n"  // pub_x: data
+                                 "  -3 : {(0x[0-9a-f]{2}, ){31}0x[0-9a-f]{2}},\n"  // pub_y: data
+                                 "}"));
+    }
+}
+
+}  // namespace
+
+void check_maced_pubkey(const MacedPublicKey& macedPubKey, bool testMode,
+                        vector<uint8_t>* payload_value) {
+    auto [coseMac0, _, mac0ParseErr] = cppbor::parse(macedPubKey.macedKey);
+    ASSERT_TRUE(coseMac0) << "COSE Mac0 parse failed " << mac0ParseErr;
+
+    ASSERT_NE(coseMac0->asArray(), nullptr);
+    ASSERT_EQ(coseMac0->asArray()->size(), kCoseMac0EntryCount);
+
+    auto protParms = coseMac0->asArray()->get(kCoseMac0ProtectedParams)->asBstr();
+    ASSERT_NE(protParms, nullptr);
+
+    // Header label:value of 'alg': HMAC-256
+    ASSERT_EQ(cppbor::prettyPrint(protParms->value()), "{\n  1 : 5,\n}");
+
+    auto unprotParms = coseMac0->asArray()->get(kCoseMac0UnprotectedParams)->asMap();
+    ASSERT_NE(unprotParms, nullptr);
+    ASSERT_EQ(unprotParms->size(), 0);
+
+    // The payload is a bstr holding an encoded COSE_Key
+    auto payload = coseMac0->asArray()->get(kCoseMac0Payload)->asBstr();
+    ASSERT_NE(payload, nullptr);
+    check_cose_key(payload->value(), testMode);
+
+    auto coseMac0Tag = coseMac0->asArray()->get(kCoseMac0Tag)->asBstr();
+    ASSERT_TRUE(coseMac0Tag);
+    auto extractedTag = coseMac0Tag->value();
+    EXPECT_EQ(extractedTag.size(), 32U);
+
+    // Compare with tag generated with kTestMacKey.  Should only match in test mode
+    auto macFunction = [](const cppcose::bytevec& input) {
+        return cppcose::generateHmacSha256(remote_prov::kTestMacKey, input);
+    };
+    auto testTag =
+            cppcose::generateCoseMac0Mac(macFunction, {} /* external_aad */, payload->value());
+    ASSERT_TRUE(testTag) << "Tag calculation failed: " << testTag.message();
+
+    if (testMode) {
+        EXPECT_THAT(*testTag, ElementsAreArray(extractedTag));
+    } else {
+        EXPECT_THAT(*testTag, Not(ElementsAreArray(extractedTag)));
+    }
+    if (payload_value != nullptr) {
+        *payload_value = payload->value();
+    }
+}
+
+void p256_pub_key(const vector<uint8_t>& coseKeyData, EVP_PKEY_Ptr* signingKey) {
+    // Extract x and y affine coordinates from the encoded Cose_Key.
+    auto [parsedPayload, __, payloadParseErr] = cppbor::parse(coseKeyData);
+    ASSERT_TRUE(parsedPayload) << "Key parse failed: " << payloadParseErr;
+    auto coseKey = parsedPayload->asMap();
+    const std::unique_ptr<cppbor::Item>& xItem = coseKey->get(cppcose::CoseKey::PUBKEY_X);
+    ASSERT_NE(xItem->asBstr(), nullptr);
+    vector<uint8_t> x = xItem->asBstr()->value();
+    const std::unique_ptr<cppbor::Item>& yItem = coseKey->get(cppcose::CoseKey::PUBKEY_Y);
+    ASSERT_NE(yItem->asBstr(), nullptr);
+    vector<uint8_t> y = yItem->asBstr()->value();
+
+    // Concatenate: 0x04 (uncompressed form marker) | x | y
+    vector<uint8_t> pubKeyData{0x04};
+    pubKeyData.insert(pubKeyData.end(), x.begin(), x.end());
+    pubKeyData.insert(pubKeyData.end(), y.begin(), y.end());
+
+    EC_KEY_Ptr ecKey = EC_KEY_Ptr(EC_KEY_new());
+    ASSERT_NE(ecKey, nullptr);
+    EC_GROUP_Ptr group = EC_GROUP_Ptr(EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1));
+    ASSERT_NE(group, nullptr);
+    ASSERT_EQ(EC_KEY_set_group(ecKey.get(), group.get()), 1);
+    EC_POINT_Ptr point = EC_POINT_Ptr(EC_POINT_new(group.get()));
+    ASSERT_NE(point, nullptr);
+    ASSERT_EQ(EC_POINT_oct2point(group.get(), point.get(), pubKeyData.data(), pubKeyData.size(),
+                                 nullptr),
+              1);
+    ASSERT_EQ(EC_KEY_set_public_key(ecKey.get(), point.get()), 1);
+
+    EVP_PKEY_Ptr pubKey = EVP_PKEY_Ptr(EVP_PKEY_new());
+    ASSERT_NE(pubKey, nullptr);
+    EVP_PKEY_assign_EC_KEY(pubKey.get(), ecKey.release());
+    *signingKey = std::move(pubKey);
 }
 
 }  // namespace test

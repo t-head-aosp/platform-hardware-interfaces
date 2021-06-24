@@ -26,9 +26,14 @@ aidl_interface {
             vndk: {
                 enabled: true,
             },
+            apps_enabled: false,
         },
         rust: {
             enabled: true,
+            apex_available: [
+                "//apex_available:platform",
+                "com.android.compos",
+            ],
         },
     },
 }

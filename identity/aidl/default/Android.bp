@@ -31,7 +31,8 @@ cc_library_static {
     ],
     static_libs: [
         "libbase",
-        "libcppbor",
+        "libcppbor_external",
+        "libcppcose_rkp",
         "libutils",
         "libsoft_attestation_cert",
         "libkeymaster_portable",
@@ -91,7 +92,8 @@ cc_binary {
     ],
     static_libs: [
         "libbase",
-        "libcppbor",
+        "libcppbor_external",
+        "libcppcose_rkp",
         "libutils",
         "libsoft_attestation_cert",
         "libkeymaster_portable",
@@ -109,6 +111,43 @@ cc_binary {
     ],
     required: [
         "android.hardware.identity_credential.xml",
+    ],
+}
+
+cc_test {
+    name: "libeic_test",
+    srcs: [
+        "EicTests.cpp",
+        "FakeSecureHardwareProxy.cpp",
+    ],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-g",
+        "-DEIC_DEBUG",
+    ],
+    local_include_dirs: [
+         "common",
+    ],
+    shared_libs: [
+        "liblog",
+        "libcrypto",
+        "libkeymaster_messages",
+    ],
+    static_libs: [
+        "libbase",
+        "libcppbor_external",
+        "libcppcose_rkp",
+        "libutils",
+        "libsoft_attestation_cert",
+        "libkeymaster_portable",
+        "libsoft_attestation_cert",
+        "libpuresoftkeymasterdevice",
+        "android.hardware.identity-support-lib",
+        "android.hardware.identity-libeic-library",
+    ],
+    test_suites: [
+        "general-tests",
     ],
 }
 

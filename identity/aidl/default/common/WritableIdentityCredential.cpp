@@ -23,8 +23,8 @@
 #include <android-base/logging.h>
 #include <android-base/stringprintf.h>
 
-#include <cppbor/cppbor.h>
-#include <cppbor/cppbor_parse.h>
+#include <cppbor.h>
+#include <cppbor_parse.h>
 
 #include <utility>
 
@@ -208,6 +208,15 @@ ndk::ScopedAStatus WritableIdentityCredential::beginAddEntry(
         return ndk::ScopedAStatus(AStatus_fromServiceSpecificErrorWithMessage(
                 IIdentityCredentialStore::STATUS_INVALID_DATA,
                 "numAccessControlProfileRemaining_ is not zero"));
+    }
+
+    // Ensure passed-in profile ids reference valid access control profiles
+    for (const int32_t id : accessControlProfileIds) {
+        if (accessControlProfileIds_.find(id) == accessControlProfileIds_.end()) {
+            return ndk::ScopedAStatus(AStatus_fromServiceSpecificErrorWithMessage(
+                    IIdentityCredentialStore::STATUS_INVALID_DATA,
+                    "An id in accessControlProfileIds references non-existing ACP"));
+        }
     }
 
     if (remainingEntryCounts_.size() == 0) {

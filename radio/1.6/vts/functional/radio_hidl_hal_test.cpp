@@ -16,8 +16,39 @@
 
 #include <radio_hidl_hal_utils_v1_6.h>
 
+bool isServiceValidForDeviceConfiguration(hidl_string& serviceName) {
+    if (isSsSsEnabled()) {
+        // Device is configured as SSSS.
+        if (serviceName != RADIO_SERVICE_SLOT1_NAME) {
+            ALOGI("%s instance is not valid for SSSS device.", serviceName.c_str());
+            return false;
+        }
+    } else if (isDsDsEnabled()) {
+        // Device is configured as DSDS.
+        if (serviceName != RADIO_SERVICE_SLOT1_NAME && serviceName != RADIO_SERVICE_SLOT2_NAME) {
+            ALOGI("%s instance is not valid for DSDS device.", serviceName.c_str());
+            return false;
+        }
+    } else if (isTsTsEnabled()) {
+        // Device is configured as TSTS.
+        if (serviceName != RADIO_SERVICE_SLOT1_NAME && serviceName != RADIO_SERVICE_SLOT2_NAME &&
+            serviceName != RADIO_SERVICE_SLOT3_NAME) {
+            ALOGI("%s instance is not valid for TSTS device.", serviceName.c_str());
+            return false;
+        }
+    }
+    return true;
+}
+
 void RadioHidlTest_v1_6::SetUp() {
-    radio_v1_6 = android::hardware::radio::V1_6::IRadio::getService(GetParam());
+    hidl_string serviceName = GetParam();
+
+    if (!isServiceValidForDeviceConfiguration(serviceName)) {
+        ALOGI("Skipped the test due to device configuration.");
+        GTEST_SKIP();
+    }
+
+    radio_v1_6 = android::hardware::radio::V1_6::IRadio::getService(serviceName);
     ASSERT_NE(nullptr, radio_v1_6.get());
 
     radioRsp_v1_6 = new (std::nothrow) RadioResponse_v1_6(*this);
@@ -86,16 +117,14 @@ void RadioHidlTest_v1_6::getDataCallList() {
  * disabled.
  * <p/>
  * Typical usage within VTS:
- * if (getRadioHalCapabilities().modemReducedFeatureSet) return;
+ * if (getRadioHalCapabilities()) return;
  */
-HalDeviceCapabilities RadioHidlTest_v1_6::getRadioHalCapabilities() {
+bool RadioHidlTest_v1_6::getRadioHalCapabilities() {
     sp<::android::hardware::radio::config::V1_3::IRadioConfig> radioConfig_v1_3 =
             ::android::hardware::radio::config::V1_3::IRadioConfig::getService();
     if (radioConfig_v1_3.get() == nullptr) {
         // If v1_3 isn't present, the values are initialized to false
-        HalDeviceCapabilities radioHalCapabilities;
-        memset(&radioHalCapabilities, 0, sizeof(radioHalCapabilities));
-        return radioHalCapabilities;
+        return false;
     } else {
         // Get radioHalDeviceCapabilities from the radio config
         sp<RadioConfigResponse> radioConfigRsp = new (std::nothrow) RadioConfigResponse(*this);
@@ -104,6 +133,6 @@ HalDeviceCapabilities RadioHidlTest_v1_6::getRadioHalCapabilities() {
 
         radioConfig_v1_3->getHalDeviceCapabilities(serial);
         EXPECT_EQ(std::cv_status::no_timeout, wait());
-        return radioConfigRsp->halDeviceCapabilities;
+        return radioConfigRsp->modemReducedFeatureSet1;
     }
 }

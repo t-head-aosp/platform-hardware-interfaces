@@ -102,7 +102,7 @@ void ProveOwnershipTests::provisionData() {
     ASSERT_TRUE(wc->addAccessControlProfile(1, {}, false, 0, 0, &sacp).isOk());
 
     // Single entry - don't care about the returned encrypted data
-    ASSERT_TRUE(wc->beginAddEntry({0}, "ns", "Some Data", 1).isOk());
+    ASSERT_TRUE(wc->beginAddEntry({1}, "ns", "Some Data", 1).isOk());
     vector<uint8_t> encryptedData;
     ASSERT_TRUE(wc->addEntryValue({9}, &encryptedData).isOk());
 
@@ -131,7 +131,7 @@ TEST_P(ProveOwnershipTests, proveOwnership) {
     optional<vector<uint8_t>> proofOfOwnership =
             support::coseSignGetPayload(proofOfOwnershipSignature);
     ASSERT_TRUE(proofOfOwnership);
-    string cborPretty = support::cborPrettyPrint(proofOfOwnership.value(), 32, {});
+    string cborPretty = cppbor::prettyPrint(proofOfOwnership.value(), 32, {});
     EXPECT_EQ("['ProofOfOwnership', 'org.iso.18013-5.2019.mdl', {0x11, 0x12}, true, ]", cborPretty);
     EXPECT_TRUE(support::coseCheckEcDsaSignature(proofOfOwnershipSignature, {},  // Additional data
                                                  credentialPubKey_));

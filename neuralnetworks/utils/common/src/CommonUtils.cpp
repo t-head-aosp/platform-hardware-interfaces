@@ -89,6 +89,90 @@ void copyPointersToSharedMemory(nn::Model::Subgraph* subgraph,
                   });
 }
 
+nn::GeneralResult<hidl_handle> createNativeHandleFrom(std::vector<base::unique_fd> fds,
+                                                      const std::vector<int32_t>& ints) {
+    constexpr size_t kIntMax = std::numeric_limits<int>::max();
+    CHECK_LE(fds.size(), kIntMax);
+    CHECK_LE(ints.size(), kIntMax);
+    native_handle_t* nativeHandle =
+            native_handle_create(static_cast<int>(fds.size()), static_cast<int>(ints.size()));
+    if (nativeHandle == nullptr) {
+        return NN_ERROR() << "Failed to create native_handle";
+    }
+
+    for (size_t i = 0; i < fds.size(); ++i) {
+        nativeHandle->data[i] = fds[i].release();
+    }
+    std::copy(ints.begin(), ints.end(), nativeHandle->data + nativeHandle->numFds);
+
+    hidl_handle handle;
+    handle.setTo(nativeHandle, /*shouldOwn=*/true);
+    return handle;
+}
+
+nn::GeneralResult<hidl_handle> createNativeHandleFrom(base::unique_fd fd,
+                                                      const std::vector<int32_t>& ints) {
+    std::vector<base::unique_fd> fds;
+    fds.push_back(std::move(fd));
+    return createNativeHandleFrom(std::move(fds), ints);
+}
+
+nn::GeneralResult<hidl_handle> createNativeHandleFrom(const nn::Memory::Unknown::Handle& handle) {
+    std::vector<base::unique_fd> fds = NN_TRY(nn::dupFds(handle.fds.begin(), handle.fds.end()));
+    return createNativeHandleFrom(std::move(fds), handle.ints);
+}
+
+nn::GeneralResult<hidl_memory> createHidlMemoryFrom(const nn::Memory::Ashmem& memory) {
+    auto fd = NN_TRY(nn::dupFd(memory.fd));
+    auto handle = NN_TRY(createNativeHandleFrom(std::move(fd), {}));
+    return hidl_memory("ashmem", std::move(handle), memory.size);
+}
+
+nn::GeneralResult<hidl_memory> createHidlMemoryFrom(const nn::Memory::Fd& memory) {
+    auto fd = NN_TRY(nn::dupFd(memory.fd));
+
+    const auto [lowOffsetBits, highOffsetBits] = nn::getIntsFromOffset(memory.offset);
+    const std::vector<int> ints = {memory.prot, lowOffsetBits, highOffsetBits};
+
+    auto handle = NN_TRY(createNativeHandleFrom(std::move(fd), ints));
+    return hidl_memory("mmap_fd", std::move(handle), memory.size);
+}
+
+nn::GeneralResult<hidl_memory> createHidlMemoryFrom(const nn::Memory::HardwareBuffer& memory) {
+    const auto* ahwb = memory.handle.get();
+    AHardwareBuffer_Desc bufferDesc;
+    AHardwareBuffer_describe(ahwb, &bufferDesc);
+
+    const bool isBlob = bufferDesc.format == AHARDWAREBUFFER_FORMAT_BLOB;
+    const size_t size = isBlob ? bufferDesc.width : 0;
+    const char* const name = isBlob ? "hardware_buffer_blob" : "hardware_buffer";
+
+    const native_handle_t* nativeHandle = AHardwareBuffer_getNativeHandle(ahwb);
+    const hidl_handle hidlHandle(nativeHandle);
+    hidl_handle copiedHandle(hidlHandle);
+
+    return hidl_memory(name, std::move(copiedHandle), size);
+}
+
+nn::GeneralResult<hidl_memory> createHidlMemoryFrom(const nn::Memory::Unknown& memory) {
+    return hidl_memory(memory.name, NN_TRY(createNativeHandleFrom(memory.handle)), memory.size);
+}
+
+nn::GeneralResult<nn::Memory::Unknown::Handle> unknownHandleFromNativeHandle(
+        const native_handle_t* handle) {
+    if (handle == nullptr) {
+        return NN_ERROR() << "unknownHandleFromNativeHandle failed because handle is nullptr";
+    }
+
+    std::vector<base::unique_fd> fds =
+            NN_TRY(nn::dupFds(handle->data + 0, handle->data + handle->numFds));
+
+    std::vector<int> ints(handle->data + handle->numFds,
+                          handle->data + handle->numFds + handle->numInts);
+
+    return nn::Memory::Unknown::Handle{.fds = std::move(fds), .ints = std::move(ints)};
+}
+
 }  // anonymous namespace
 
 nn::Capabilities::OperandPerformanceTable makeQuantized8PerformanceConsistentWithP(
@@ -147,10 +231,31 @@ nn::GeneralResult<std::reference_wrapper<const nn::Model>> flushDataFromPointerT
     return **maybeModelInSharedOut;
 }
 
-nn::GeneralResult<std::reference_wrapper<const nn::Request>> flushDataFromPointerToShared(
-        const nn::Request* request, std::optional<nn::Request>* maybeRequestInSharedOut) {
+template <>
+void InputRelocationTracker::flush() const {
+    // Copy from pointers to shared memory.
+    uint8_t* memoryPtr = static_cast<uint8_t*>(std::get<void*>(kMapping.pointer));
+    for (const auto& [data, length, offset] : kRelocationInfos) {
+        std::memcpy(memoryPtr + offset, data, length);
+    }
+}
+
+template <>
+void OutputRelocationTracker::flush() const {
+    // Copy from shared memory to pointers.
+    const uint8_t* memoryPtr = static_cast<const uint8_t*>(
+            std::visit([](auto ptr) { return static_cast<const void*>(ptr); }, kMapping.pointer));
+    for (const auto& [data, length, offset] : kRelocationInfos) {
+        std::memcpy(data, memoryPtr + offset, length);
+    }
+}
+
+nn::GeneralResult<std::reference_wrapper<const nn::Request>> convertRequestFromPointerToShared(
+        const nn::Request* request, uint32_t alignment, uint32_t padding,
+        std::optional<nn::Request>* maybeRequestInSharedOut, RequestRelocation* relocationOut) {
     CHECK(request != nullptr);
     CHECK(maybeRequestInSharedOut != nullptr);
+    CHECK(relocationOut != nullptr);
 
     if (hasNoPointerData(*request)) {
         return *request;
@@ -160,8 +265,11 @@ nn::GeneralResult<std::reference_wrapper<const nn::Request>> flushDataFromPointe
     // to the caller through `maybeRequestInSharedOut` if the function succeeds.
     nn::Request requestInShared = *request;
 
+    RequestRelocation relocation;
+
     // Change input pointers to shared memory.
-    nn::ConstantMemoryBuilder inputBuilder(requestInShared.pools.size());
+    nn::MutableMemoryBuilder inputBuilder(requestInShared.pools.size());
+    std::vector<InputRelocationInfo> inputRelocationInfos;
     for (auto& input : requestInShared.inputs) {
         const auto& location = input.location;
         if (input.lifetime != nn::Request::Argument::LifeTime::POINTER) {
@@ -172,17 +280,21 @@ nn::GeneralResult<std::reference_wrapper<const nn::Request>> flushDataFromPointe
         const void* data = std::visit([](auto ptr) { return static_cast<const void*>(ptr); },
                                       location.pointer);
         CHECK(data != nullptr);
-        input.location = inputBuilder.append(data, location.length);
+        input.location = inputBuilder.append(location.length, alignment, padding);
+        inputRelocationInfos.push_back({data, input.location.length, input.location.offset});
     }
 
     // Allocate input memory.
     if (!inputBuilder.empty()) {
         auto memory = NN_TRY(inputBuilder.finish());
-        requestInShared.pools.push_back(std::move(memory));
+        requestInShared.pools.push_back(memory);
+        relocation.input = NN_TRY(
+                InputRelocationTracker::create(std::move(inputRelocationInfos), std::move(memory)));
     }
 
     // Change output pointers to shared memory.
     nn::MutableMemoryBuilder outputBuilder(requestInShared.pools.size());
+    std::vector<OutputRelocationInfo> outputRelocationInfos;
     for (auto& output : requestInShared.outputs) {
         const auto& location = output.location;
         if (output.lifetime != nn::Request::Argument::LifeTime::POINTER) {
@@ -190,60 +302,23 @@ nn::GeneralResult<std::reference_wrapper<const nn::Request>> flushDataFromPointe
         }
 
         output.lifetime = nn::Request::Argument::LifeTime::POOL;
-        output.location = outputBuilder.append(location.length);
+        void* data = std::get<void*>(location.pointer);
+        CHECK(data != nullptr);
+        output.location = outputBuilder.append(location.length, alignment, padding);
+        outputRelocationInfos.push_back({data, output.location.length, output.location.offset});
     }
 
     // Allocate output memory.
     if (!outputBuilder.empty()) {
         auto memory = NN_TRY(outputBuilder.finish());
-        requestInShared.pools.push_back(std::move(memory));
+        requestInShared.pools.push_back(memory);
+        relocation.output = NN_TRY(OutputRelocationTracker::create(std::move(outputRelocationInfos),
+                                                                   std::move(memory)));
     }
 
     *maybeRequestInSharedOut = requestInShared;
+    *relocationOut = std::move(relocation);
     return **maybeRequestInSharedOut;
-}
-
-nn::GeneralResult<void> unflushDataFromSharedToPointer(
-        const nn::Request& request, const std::optional<nn::Request>& maybeRequestInShared) {
-    if (!maybeRequestInShared.has_value() || maybeRequestInShared->pools.empty() ||
-        !std::holds_alternative<nn::SharedMemory>(maybeRequestInShared->pools.back())) {
-        return {};
-    }
-    const auto& requestInShared = *maybeRequestInShared;
-
-    // Map the memory.
-    const auto& outputMemory = std::get<nn::SharedMemory>(requestInShared.pools.back());
-    const auto [pointer, size, context] = NN_TRY(map(outputMemory));
-    const uint8_t* constantPointer =
-            std::visit([](const auto& o) { return static_cast<const uint8_t*>(o); }, pointer);
-
-    // Flush each output pointer.
-    CHECK_EQ(request.outputs.size(), requestInShared.outputs.size());
-    for (size_t i = 0; i < request.outputs.size(); ++i) {
-        const auto& location = request.outputs[i].location;
-        const auto& locationInShared = requestInShared.outputs[i].location;
-        if (!std::holds_alternative<void*>(location.pointer)) {
-            continue;
-        }
-
-        // Get output pointer and size.
-        void* data = std::get<void*>(location.pointer);
-        CHECK(data != nullptr);
-        const size_t length = location.length;
-
-        // Get output pool location.
-        CHECK(requestInShared.outputs[i].lifetime == nn::Request::Argument::LifeTime::POOL);
-        const size_t index = locationInShared.poolIndex;
-        const size_t offset = locationInShared.offset;
-        const size_t outputPoolIndex = requestInShared.pools.size() - 1;
-        CHECK(locationInShared.length == length);
-        CHECK(index == outputPoolIndex);
-
-        // Flush memory.
-        std::memcpy(data, constantPointer + offset, length);
-    }
-
-    return {};
 }
 
 nn::GeneralResult<std::vector<uint32_t>> countNumberOfConsumers(
@@ -255,27 +330,7 @@ nn::GeneralResult<hidl_memory> createHidlMemoryFromSharedMemory(const nn::Shared
     if (memory == nullptr) {
         return NN_ERROR() << "Memory must be non-empty";
     }
-    if (const auto* handle = std::get_if<nn::Handle>(&memory->handle)) {
-        return hidl_memory(memory->name, NN_TRY(hidlHandleFromSharedHandle(*handle)), memory->size);
-    }
-
-    const auto* ahwb = std::get<nn::HardwareBufferHandle>(memory->handle).get();
-    AHardwareBuffer_Desc bufferDesc;
-    AHardwareBuffer_describe(ahwb, &bufferDesc);
-
-    if (bufferDesc.format == AHARDWAREBUFFER_FORMAT_BLOB) {
-        CHECK_EQ(memory->size, bufferDesc.width);
-        CHECK_EQ(memory->name, "hardware_buffer_blob");
-    } else {
-        CHECK_EQ(memory->size, 0u);
-        CHECK_EQ(memory->name, "hardware_buffer");
-    }
-
-    const native_handle_t* nativeHandle = AHardwareBuffer_getNativeHandle(ahwb);
-    const hidl_handle hidlHandle(nativeHandle);
-    hidl_handle handle(hidlHandle);
-
-    return hidl_memory(memory->name, std::move(handle), memory->size);
+    return std::visit([](const auto& x) { return createHidlMemoryFrom(x); }, memory->handle);
 }
 
 static uint32_t roundUpToMultiple(uint32_t value, uint32_t multiple) {
@@ -283,14 +338,53 @@ static uint32_t roundUpToMultiple(uint32_t value, uint32_t multiple) {
 }
 
 nn::GeneralResult<nn::SharedMemory> createSharedMemoryFromHidlMemory(const hidl_memory& memory) {
-    CHECK_LE(memory.size(), std::numeric_limits<uint32_t>::max());
+    CHECK_LE(memory.size(), std::numeric_limits<size_t>::max());
+    if (!memory.valid()) {
+        return NN_ERROR() << "Unable to convert invalid hidl_memory";
+    }
+
+    if (memory.name() == "ashmem") {
+        if (memory.handle()->numFds != 1) {
+            return NN_ERROR() << "Unable to convert invalid ashmem memory object with "
+                              << memory.handle()->numFds << " numFds, but expected 1";
+        }
+        if (memory.handle()->numInts != 0) {
+            return NN_ERROR() << "Unable to convert invalid ashmem memory object with "
+                              << memory.handle()->numInts << " numInts, but expected 0";
+        }
+        auto handle = nn::Memory::Ashmem{
+                .fd = NN_TRY(nn::dupFd(memory.handle()->data[0])),
+                .size = static_cast<size_t>(memory.size()),
+        };
+        return std::make_shared<const nn::Memory>(nn::Memory{.handle = std::move(handle)});
+    }
+
+    if (memory.name() == "mmap_fd") {
+        if (memory.handle()->numFds != 1) {
+            return NN_ERROR() << "Unable to convert invalid mmap_fd memory object with "
+                              << memory.handle()->numFds << " numFds, but expected 1";
+        }
+        if (memory.handle()->numInts != 3) {
+            return NN_ERROR() << "Unable to convert invalid mmap_fd memory object with "
+                              << memory.handle()->numInts << " numInts, but expected 3";
+        }
+
+        const int fd = memory.handle()->data[0];
+        const int prot = memory.handle()->data[1];
+        const int lower = memory.handle()->data[2];
+        const int higher = memory.handle()->data[3];
+        const size_t offset = nn::getOffsetFromInts(lower, higher);
+
+        return nn::createSharedMemoryFromFd(static_cast<size_t>(memory.size()), prot, fd, offset);
+    }
 
     if (memory.name() != "hardware_buffer_blob") {
-        return std::make_shared<const nn::Memory>(nn::Memory{
-                .handle = NN_TRY(sharedHandleFromNativeHandle(memory.handle())),
-                .size = static_cast<uint32_t>(memory.size()),
+        auto handle = nn::Memory::Unknown{
+                .handle = NN_TRY(unknownHandleFromNativeHandle(memory.handle())),
+                .size = static_cast<size_t>(memory.size()),
                 .name = memory.name(),
-        });
+        };
+        return std::make_shared<const nn::Memory>(nn::Memory{.handle = std::move(handle)});
     }
 
     const auto size = memory.size();
@@ -328,61 +422,23 @@ nn::GeneralResult<nn::SharedMemory> createSharedMemoryFromHidlMemory(const hidl_
                << "Can't create AHardwareBuffer from handle. Error: " << status;
     }
 
-    return std::make_shared<const nn::Memory>(nn::Memory{
-            .handle = nn::HardwareBufferHandle(hardwareBuffer, /*takeOwnership=*/true),
-            .size = static_cast<uint32_t>(memory.size()),
-            .name = memory.name(),
-    });
+    return nn::createSharedMemoryFromAHWB(hardwareBuffer, /*takeOwnership=*/true);
 }
 
 nn::GeneralResult<hidl_handle> hidlHandleFromSharedHandle(const nn::Handle& handle) {
-    std::vector<base::unique_fd> fds;
-    fds.reserve(handle.fds.size());
-    for (const auto& fd : handle.fds) {
-        const int dupFd = dup(fd);
-        if (dupFd == -1) {
-            return NN_ERROR(nn::ErrorStatus::GENERAL_FAILURE) << "Failed to dup the fd";
-        }
-        fds.emplace_back(dupFd);
-    }
-
-    constexpr size_t kIntMax = std::numeric_limits<int>::max();
-    CHECK_LE(handle.fds.size(), kIntMax);
-    CHECK_LE(handle.ints.size(), kIntMax);
-    native_handle_t* nativeHandle = native_handle_create(static_cast<int>(handle.fds.size()),
-                                                         static_cast<int>(handle.ints.size()));
-    if (nativeHandle == nullptr) {
-        return NN_ERROR(nn::ErrorStatus::GENERAL_FAILURE) << "Failed to create native_handle";
-    }
-    for (size_t i = 0; i < fds.size(); ++i) {
-        nativeHandle->data[i] = fds[i].release();
-    }
-    std::copy(handle.ints.begin(), handle.ints.end(), &nativeHandle->data[nativeHandle->numFds]);
-
-    hidl_handle hidlHandle;
-    hidlHandle.setTo(nativeHandle, /*shouldOwn=*/true);
-    return hidlHandle;
+    base::unique_fd fd = NN_TRY(nn::dupFd(handle.get()));
+    return createNativeHandleFrom(std::move(fd), {});
 }
 
 nn::GeneralResult<nn::Handle> sharedHandleFromNativeHandle(const native_handle_t* handle) {
     if (handle == nullptr) {
         return NN_ERROR() << "sharedHandleFromNativeHandle failed because handle is nullptr";
     }
-
-    std::vector<base::unique_fd> fds;
-    fds.reserve(handle->numFds);
-    for (int i = 0; i < handle->numFds; ++i) {
-        const int dupFd = dup(handle->data[i]);
-        if (dupFd == -1) {
-            return NN_ERROR(nn::ErrorStatus::GENERAL_FAILURE) << "Failed to dup the fd";
-        }
-        fds.emplace_back(dupFd);
+    if (handle->numFds != 1 || handle->numInts != 0) {
+        return NN_ERROR() << "sharedHandleFromNativeHandle failed because handle does not only "
+                             "hold a single fd";
     }
-
-    std::vector<int> ints(&handle->data[handle->numFds],
-                          &handle->data[handle->numFds + handle->numInts]);
-
-    return nn::Handle{.fds = std::move(fds), .ints = std::move(ints)};
+    return nn::dupFd(handle->data[0]);
 }
 
 nn::GeneralResult<hidl_vec<hidl_handle>> convertSyncFences(

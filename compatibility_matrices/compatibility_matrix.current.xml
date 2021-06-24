@@ -1,4 +1,4 @@
-<compatibility-matrix version="1.0" type="framework" level="6">
+<compatibility-matrix version="1.0" type="framework" level="7">
     <hal format="hidl" optional="true">
         <name>android.hardware.atrace</name>
         <version>1.0</version>
@@ -297,7 +297,7 @@
             <instance>default</instance>
         </interface>
     </hal>
-    <hal format="hidl" optional="false">
+    <hal format="hidl" optional="true">
         <name>android.hardware.keymaster</name>
         <version>3.0</version>
         <version>4.0-1</version>
