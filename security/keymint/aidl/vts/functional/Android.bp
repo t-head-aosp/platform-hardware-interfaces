@@ -34,8 +34,8 @@ cc_defaults {
         "libcrypto",
     ],
     static_libs: [
-        "android.hardware.security.keymint-V1-ndk_platform",
-        "android.hardware.security.secureclock-V1-ndk_platform",
+        "android.hardware.security.keymint-V1-ndk",
+        "android.hardware.security.secureclock-V1-ndk",
         "libcppbor_external",
         "libcppcose_rkp",
         "libjsoncpp",
@@ -94,6 +94,7 @@ cc_test {
         "libkeymint_vts_test_utils",
         "libpuresoftkeymasterdevice",
     ],
+    test_config: "VtsRemotelyProvisionedComponentTests.xml",
     test_suites: [
         "general-tests",
         "vts",
