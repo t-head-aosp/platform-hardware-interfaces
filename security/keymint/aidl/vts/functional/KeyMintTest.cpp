@@ -1493,9 +1493,8 @@ TEST_P(NewKeyGenerationTest, EcdsaAttestationTags) {
             tag.tag == TAG_ROLLBACK_RESISTANCE) {
             continue;
         }
-        if (result == ErrorCode::UNSUPPORTED_TAG &&
-            (tag.tag == TAG_ALLOW_WHILE_ON_BODY || tag.tag == TAG_TRUSTED_USER_PRESENCE_REQUIRED)) {
-            // Optional tag not supported by this KeyMint implementation.
+        if (result == ErrorCode::UNSUPPORTED_TAG && tag.tag == TAG_TRUSTED_USER_PRESENCE_REQUIRED) {
+            // Tag not required to be supported by all KeyMint implementations.
             continue;
         }
         ASSERT_EQ(result, ErrorCode::OK);
@@ -1507,9 +1506,8 @@ TEST_P(NewKeyGenerationTest, EcdsaAttestationTags) {
 
         AuthorizationSet hw_enforced = HwEnforcedAuthorizations(key_characteristics);
         AuthorizationSet sw_enforced = SwEnforcedAuthorizations(key_characteristics);
-        if (tag.tag != TAG_ATTESTATION_APPLICATION_ID) {
-            // Expect to find most of the extra tags in the key characteristics
-            // of the generated key (but not for ATTESTATION_APPLICATION_ID).
+        // Some tags are optional, so don't require them to be in the enforcements.
+        if (tag.tag != TAG_ATTESTATION_APPLICATION_ID && tag.tag != TAG_ALLOW_WHILE_ON_BODY) {
             EXPECT_TRUE(hw_enforced.Contains(tag.tag) || sw_enforced.Contains(tag.tag))
                     << tag << " not in hw:" << hw_enforced << " nor sw:" << sw_enforced;
         }
@@ -3273,10 +3271,10 @@ TEST_P(ImportKeyTest, AesFailure) {
     for (uint32_t key_size : {bitlen - 1, bitlen + 1, bitlen - 8, bitlen + 8}) {
         // Explicit key size doesn't match that of the provided key.
         auto result = ImportKey(AuthorizationSetBuilder()
-                                    .Authorization(TAG_NO_AUTH_REQUIRED)
-                                    .AesEncryptionKey(key_size)
-                                    .EcbMode()
-                                    .Padding(PaddingMode::PKCS7),
+                                        .Authorization(TAG_NO_AUTH_REQUIRED)
+                                        .AesEncryptionKey(key_size)
+                                        .EcbMode()
+                                        .Padding(PaddingMode::PKCS7),
                                 KeyFormat::RAW, key);
         ASSERT_TRUE(result == ErrorCode::IMPORT_PARAMETER_MISMATCH ||
                     result == ErrorCode::UNSUPPORTED_KEY_SIZE)
@@ -3340,10 +3338,10 @@ TEST_P(ImportKeyTest, TripleDesFailure) {
     for (uint32_t key_size : {bitlen - 1, bitlen + 1, bitlen - 8, bitlen + 8}) {
         // Explicit key size doesn't match that of the provided key.
         auto result = ImportKey(AuthorizationSetBuilder()
-                                    .Authorization(TAG_NO_AUTH_REQUIRED)
-                                    .TripleDesEncryptionKey(key_size)
-                                    .EcbMode()
-                                    .Padding(PaddingMode::PKCS7),
+                                        .Authorization(TAG_NO_AUTH_REQUIRED)
+                                        .TripleDesEncryptionKey(key_size)
+                                        .EcbMode()
+                                        .Padding(PaddingMode::PKCS7),
                                 KeyFormat::RAW, key);
         ASSERT_TRUE(result == ErrorCode::IMPORT_PARAMETER_MISMATCH ||
                     result == ErrorCode::UNSUPPORTED_KEY_SIZE)
@@ -6205,7 +6203,8 @@ TEST_P(KeyDeletionTest, DeleteAllKeys) {
                                      .Digest(Digest::NONE)
                                      .Padding(PaddingMode::NONE)
                                      .Authorization(TAG_NO_AUTH_REQUIRED)
-                                     .Authorization(TAG_ROLLBACK_RESISTANCE));
+                                     .Authorization(TAG_ROLLBACK_RESISTANCE)
+                                     .SetDefaultValidity());
     ASSERT_TRUE(error == ErrorCode::ROLLBACK_RESISTANCE_UNAVAILABLE || error == ErrorCode::OK);
 
     // Delete must work if rollback protection is implemented
