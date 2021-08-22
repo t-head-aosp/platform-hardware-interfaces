@@ -96,7 +96,8 @@ import android.hardware.security.secureclock.TimeStampToken;
  *
  * o   AES
  *
- *      - 128 and 256-bit keys
+ *      - TRUSTED_ENVIRONMENT IKeyMintDevices must support 128, 192 and 256-bit keys.
+ *        STRONGBOX IKeyMintDevices must only support 128 and 256-bit keys.
  *      - CBC, CTR, ECB and GCM modes.  The GCM mode must not allow the use of tags smaller than 96
  *        bits or nonce lengths other than 96 bits.
  *      - CBC and ECB modes must support unpadded and PKCS7 padding modes.  With no padding CBC and
@@ -233,8 +234,6 @@ interface IKeyMintDevice {
      * indistinguishable from random.  Thus, if the entropy from any source is good, the output
      * must be good.
      *
-     * TODO(seleneh) specify what mixing functions and cprng we allow.
-     *
      * @param data Bytes to be mixed into the CRNG seed.  The caller must not provide more than 2
      *        KiB of data per invocation.
      *
@@ -277,6 +276,10 @@ interface IKeyMintDevice {
      *   must return ErrorCode::INVALID_ARGUMENT.  The values 3 and 65537 must be supported.  It is
      *   recommended to support all prime values up to 2^64.
      *
+     * o Tag::CERTIFICATE_NOT_BEFORE and Tag::CERTIFICATE_NOT_AFTER specify the valid date range for
+     *   the returned X.509 certificate holding the public key. If omitted, generateKey must return
+     *   ErrorCode::MISSING_NOT_BEFORE or ErrorCode::MISSING_NOT_AFTER.
+     *
      * The following parameters are not necessary to generate a usable RSA key, but generateKey must
      * not return an error if they are omitted:
      *
@@ -297,6 +300,10 @@ interface IKeyMintDevice {
      * Tag::EC_CURVE must be provided to generate an ECDSA key.  If it is not provided, generateKey
      * must return ErrorCode::UNSUPPORTED_KEY_SIZE. TEE IKeyMintDevice implementations must support
      * all curves.  StrongBox implementations must support P_256.
+
+     * Tag::CERTIFICATE_NOT_BEFORE and Tag::CERTIFICATE_NOT_AFTER must be provided to specify the
+     * valid date range for the returned X.509 certificate holding the public key. If omitted,
+     * generateKey must return ErrorCode::MISSING_NOT_BEFORE or ErrorCode::MISSING_NOT_AFTER.
      *
      * == AES Keys ==
      *
@@ -318,10 +325,11 @@ interface IKeyMintDevice {
      * @param attestationKey, if provided, specifies the key that must be used to sign the
      *        attestation certificate.  If `keyParams` does not contain a Tag::ATTESTATION_CHALLENGE
      *        but `attestationKey` is non-null, the IKeyMintDevice must return
-     *        ErrorCode::INVALID_ARGUMENT.  If the provided AttestationKey does not contain a key
-     *        blob containing an asymmetric key with KeyPurpose::ATTEST_KEY, the IKeyMintDevice must
-     *        return ErrorCode::INCOMPATIBLE_PURPOSE.  If the provided AttestationKey has an empty
-     *        issuer subject name, the IKeyMintDevice must return ErrorCode::INVALID_ARGUMENT.
+     *        ErrorCode::ATTESTATION_CHALLENGE_MISSING. If the provided AttestationKey does not
+     *        contain a key blob containing an asymmetric key with KeyPurpose::ATTEST_KEY, the
+     *        IKeyMintDevice must return ErrorCode::INCOMPATIBLE_PURPOSE.  If the provided
+     *        AttestationKey has an empty issuer subject name, the IKeyMintDevice must return
+     *        ErrorCode::INVALID_ARGUMENT.
      *
      *        If `attestationKey` is null and `keyParams` contains Tag::ATTESTATION_CHALLENGE but
      *        the KeyMint implementation does not have factory-provisioned attestation keys, it must
@@ -804,9 +812,10 @@ interface IKeyMintDevice {
     byte[] convertStorageKeyToEphemeral(in byte[] storageKeyBlob);
 
     /**
-     * Returns parameters associated with the provided key. This should match the
-     * KeyCharacteristics present in the KeyCreationResult returned by generateKey(),
-     * importKey(), or importWrappedKey().
+     * Returns KeyMint-enforced parameters associated with the provided key. The returned tags are
+     * a subset of KeyCharacteristics found in the KeyCreationResult returned by generateKey(),
+     * importKey(), or importWrappedKey(). The returned value is a subset, as it does not include
+     * any Keystore-enforced parameters.
      *
      * @param keyBlob The opaque descriptor returned by generateKey, importKey or importWrappedKey.
      *

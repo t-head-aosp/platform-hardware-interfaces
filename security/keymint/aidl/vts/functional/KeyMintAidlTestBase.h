@@ -16,8 +16,12 @@
 
 #pragma once
 
+#include <functional>
+#include <string_view>
+
 #include <aidl/Gtest.h>
 #include <aidl/Vintf.h>
+#include <android-base/properties.h>
 #include <binder/IServiceManager.h>
 #include <binder/ProcessState.h>
 #include <gtest/gtest.h>
@@ -72,6 +76,8 @@ class KeyMintAidlTestBase : public ::testing::TestWithParam<string> {
     uint32_t os_version() { return os_version_; }
     uint32_t os_patch_level() { return os_patch_level_; }
     uint32_t vendor_patch_level() { return vendor_patch_level_; }
+    uint32_t boot_patch_level(const vector<KeyCharacteristics>& key_characteristics);
+    uint32_t boot_patch_level();
 
     ErrorCode GetReturnErrorCode(const Status& result);
 
@@ -103,6 +109,18 @@ class KeyMintAidlTestBase : public ::testing::TestWithParam<string> {
         return ImportWrappedKey(wrapped_key, wrapping_key, wrapping_key_desc, masking_key,
                                 unwrapping_params, 0 /* password_sid */, 0 /* biometric_sid */);
     }
+
+    ErrorCode GetCharacteristics(const vector<uint8_t>& key_blob, const vector<uint8_t>& app_id,
+                                 const vector<uint8_t>& app_data,
+                                 vector<KeyCharacteristics>* key_characteristics);
+    ErrorCode GetCharacteristics(const vector<uint8_t>& key_blob,
+                                 vector<KeyCharacteristics>* key_characteristics);
+
+    void CheckCharacteristics(const vector<uint8_t>& key_blob,
+                              const vector<KeyCharacteristics>& generate_characteristics);
+    void CheckAppIdCharacteristics(const vector<uint8_t>& key_blob, std::string_view app_id_string,
+                                   std::string_view app_data_string,
+                                   const vector<KeyCharacteristics>& generate_characteristics);
 
     ErrorCode DeleteKey(vector<uint8_t>* key_blob, bool keep_key_blob = false);
     ErrorCode DeleteKey(bool keep_key_blob = false);
@@ -162,7 +180,10 @@ class KeyMintAidlTestBase : public ::testing::TestWithParam<string> {
                        const string& signature, const AuthorizationSet& params);
     void VerifyMessage(const string& message, const string& signature,
                        const AuthorizationSet& params);
+    void LocalVerifyMessage(const string& message, const string& signature,
+                            const AuthorizationSet& params);
 
+    string LocalRsaEncryptMessage(const string& message, const AuthorizationSet& params);
     string EncryptMessage(const vector<uint8_t>& key_blob, const string& message,
                           const AuthorizationSet& in_params, AuthorizationSet* out_params);
     string EncryptMessage(const string& message, const AuthorizationSet& params,
@@ -189,50 +210,58 @@ class KeyMintAidlTestBase : public ::testing::TestWithParam<string> {
     template <typename TagType>
     std::tuple<KeyData /* aesKey */, KeyData /* hmacKey */, KeyData /* rsaKey */,
                KeyData /* ecdsaKey */>
-    CreateTestKeys(TagType tagToTest, ErrorCode expectedReturn) {
+    CreateTestKeys(
+            TagType tagToTest, ErrorCode expectedReturn,
+            std::function<void(AuthorizationSetBuilder*)> tagModifier =
+                    [](AuthorizationSetBuilder*) {}) {
         /* AES */
         KeyData aesKeyData;
-        ErrorCode errorCode = GenerateKey(AuthorizationSetBuilder()
-                                                  .AesEncryptionKey(128)
-                                                  .Authorization(tagToTest)
-                                                  .BlockMode(BlockMode::ECB)
-                                                  .Padding(PaddingMode::NONE)
-                                                  .Authorization(TAG_NO_AUTH_REQUIRED),
-                                          &aesKeyData.blob, &aesKeyData.characteristics);
+        AuthorizationSetBuilder aesBuilder = AuthorizationSetBuilder()
+                                                     .AesEncryptionKey(128)
+                                                     .Authorization(tagToTest)
+                                                     .BlockMode(BlockMode::ECB)
+                                                     .Padding(PaddingMode::NONE)
+                                                     .Authorization(TAG_NO_AUTH_REQUIRED);
+        tagModifier(&aesBuilder);
+        ErrorCode errorCode =
+                GenerateKey(aesBuilder, &aesKeyData.blob, &aesKeyData.characteristics);
         EXPECT_EQ(expectedReturn, errorCode);
 
         /* HMAC */
         KeyData hmacKeyData;
-        errorCode = GenerateKey(AuthorizationSetBuilder()
-                                        .HmacKey(128)
-                                        .Authorization(tagToTest)
-                                        .Digest(Digest::SHA_2_256)
-                                        .Authorization(TAG_MIN_MAC_LENGTH, 128)
-                                        .Authorization(TAG_NO_AUTH_REQUIRED),
-                                &hmacKeyData.blob, &hmacKeyData.characteristics);
+        AuthorizationSetBuilder hmacBuilder = AuthorizationSetBuilder()
+                                                      .HmacKey(128)
+                                                      .Authorization(tagToTest)
+                                                      .Digest(Digest::SHA_2_256)
+                                                      .Authorization(TAG_MIN_MAC_LENGTH, 128)
+                                                      .Authorization(TAG_NO_AUTH_REQUIRED);
+        tagModifier(&hmacBuilder);
+        errorCode = GenerateKey(hmacBuilder, &hmacKeyData.blob, &hmacKeyData.characteristics);
         EXPECT_EQ(expectedReturn, errorCode);
 
         /* RSA */
         KeyData rsaKeyData;
-        errorCode = GenerateKey(AuthorizationSetBuilder()
-                                        .RsaSigningKey(2048, 65537)
-                                        .Authorization(tagToTest)
-                                        .Digest(Digest::NONE)
-                                        .Padding(PaddingMode::NONE)
-                                        .Authorization(TAG_NO_AUTH_REQUIRED)
-                                        .SetDefaultValidity(),
-                                &rsaKeyData.blob, &rsaKeyData.characteristics);
+        AuthorizationSetBuilder rsaBuilder = AuthorizationSetBuilder()
+                                                     .RsaSigningKey(2048, 65537)
+                                                     .Authorization(tagToTest)
+                                                     .Digest(Digest::NONE)
+                                                     .Padding(PaddingMode::NONE)
+                                                     .Authorization(TAG_NO_AUTH_REQUIRED)
+                                                     .SetDefaultValidity();
+        tagModifier(&rsaBuilder);
+        errorCode = GenerateKey(rsaBuilder, &rsaKeyData.blob, &rsaKeyData.characteristics);
         EXPECT_EQ(expectedReturn, errorCode);
 
         /* ECDSA */
         KeyData ecdsaKeyData;
-        errorCode = GenerateKey(AuthorizationSetBuilder()
-                                        .EcdsaSigningKey(256)
-                                        .Authorization(tagToTest)
-                                        .Digest(Digest::SHA_2_256)
-                                        .Authorization(TAG_NO_AUTH_REQUIRED)
-                                        .SetDefaultValidity(),
-                                &ecdsaKeyData.blob, &ecdsaKeyData.characteristics);
+        AuthorizationSetBuilder ecdsaBuilder = AuthorizationSetBuilder()
+                                                       .EcdsaSigningKey(EcCurve::P_256)
+                                                       .Authorization(tagToTest)
+                                                       .Digest(Digest::SHA_2_256)
+                                                       .Authorization(TAG_NO_AUTH_REQUIRED)
+                                                       .SetDefaultValidity();
+        tagModifier(&ecdsaBuilder);
+        errorCode = GenerateKey(ecdsaBuilder, &ecdsaKeyData.blob, &ecdsaKeyData.characteristics);
         EXPECT_EQ(expectedReturn, errorCode);
         return {aesKeyData, hmacKeyData, rsaKeyData, ecdsaKeyData};
     }
@@ -287,6 +316,16 @@ class KeyMintAidlTestBase : public ::testing::TestWithParam<string> {
     long challenge_;
 };
 
+// If the given property is available, add it to the tag set under the given tag ID.
+template <Tag tag>
+void add_tag_from_prop(AuthorizationSetBuilder* tags, TypedTag<TagType::BYTES, tag> ttag,
+                       const char* prop) {
+    std::string prop_value = ::android::base::GetProperty(prop, /* default= */ "");
+    if (!prop_value.empty()) {
+        tags->Authorization(ttag, prop_value.data(), prop_value.size());
+    }
+}
+
 vector<uint8_t> build_serial_blob(const uint64_t serial_int);
 void verify_subject(const X509* cert, const string& subject, bool self_signed);
 void verify_serial(X509* cert, const uint64_t expected_serial);
@@ -310,7 +349,8 @@ void p256_pub_key(const vector<uint8_t>& coseKeyData, EVP_PKEY_Ptr* signingKey);
 
 AuthorizationSet HwEnforcedAuthorizations(const vector<KeyCharacteristics>& key_characteristics);
 AuthorizationSet SwEnforcedAuthorizations(const vector<KeyCharacteristics>& key_characteristics);
-::testing::AssertionResult ChainSignaturesAreValid(const vector<Certificate>& chain);
+::testing::AssertionResult ChainSignaturesAreValid(const vector<Certificate>& chain,
+                                                   bool strict_issuer_check = true);
 
 #define INSTANTIATE_KEYMINT_AIDL_TEST(name)                                          \
     INSTANTIATE_TEST_SUITE_P(PerInstance, name,                                      \
